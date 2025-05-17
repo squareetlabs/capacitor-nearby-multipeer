@@ -1,3 +1,5 @@
+import type { PluginListenerHandle } from '@capacitor/core';
+
 export interface NearbyMultipeerPlugin {
   /**
    * Método de prueba para verificar que el plugin funciona
@@ -71,6 +73,41 @@ export interface NearbyMultipeerPlugin {
    * @param options Opciones del mensaje
    */
   sendMessage(options: { endpointId: string, data: string }): Promise<void>;
+
+  /**
+   * Agrega un listener para un evento específico
+   * @param eventName Nombre del evento
+   * @param listenerFunc Función que maneja el evento
+   */
+  addListener(
+    eventName: 'connectionRequested',
+    listenerFunc: (event: ConnectionRequestEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'connectionResult',
+    listenerFunc: (event: ConnectionResultEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'endpointFound',
+    listenerFunc: (event: EndpointFoundEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'endpointLost',
+    listenerFunc: (event: EndpointLostEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'message',
+    listenerFunc: (event: MessageReceivedEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'payloadTransferUpdate',
+    listenerFunc: (event: PayloadTransferUpdateEvent) => void
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+
+  /**
+   * Remueve todos los listeners registrados
+   */
+  removeAllListeners(): Promise<void>;
 }
 
 /**
@@ -144,6 +181,8 @@ export interface ConnectionResultEvent {
 
   /**
    * Código de estado de la conexión
+   * 0 = éxito
+   * -1 = error
    */
   status: number;
 }
@@ -214,6 +253,8 @@ export interface PayloadTransferUpdateEvent {
 
   /**
    * Estado de la transferencia
+   * 2 = en progreso
+   * 3 = completado
    */
   status: number;
 }

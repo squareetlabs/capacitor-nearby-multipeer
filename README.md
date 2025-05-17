@@ -1,6 +1,13 @@
 # @squareetlabs/capacitor-nearby-multipeer
 
-Capacitor plugin for Google Nearby & iOS Multipeer Connectivity
+Capacitor plugin for Google Nearby & iOS Multipeer Connectivity. This plugin enables cross-platform peer-to-peer communication between Android and iOS devices using Google Nearby Connections API on Android and Multipeer Connectivity framework on iOS.
+
+## Features
+
+- Cross-platform communication between Android and iOS devices
+- Bluetooth support for direct device-to-device communication
+- Automatic fallback to Bluetooth when Nearby Connections is not available
+- Simple API for advertising, discovery, and message exchange
 
 ## Install
 
@@ -9,207 +16,230 @@ npm install @squareetlabs/capacitor-nearby-multipeer
 npx cap sync
 ```
 
-## API
+## Basic Usage
 
-<docgen-index>
-
-* [`echo(...)`](#echo)
-* [`initialize(...)`](#initialize)
-* [`setStrategy(...)`](#setstrategy)
-* [`startAdvertising(...)`](#startadvertising)
-* [`stopAdvertising()`](#stopadvertising)
-* [`startDiscovery()`](#startdiscovery)
-* [`stopDiscovery()`](#stopdiscovery)
-* [`connect(...)`](#connect)
-* [`acceptConnection(...)`](#acceptconnection)
-* [`rejectConnection(...)`](#rejectconnection)
-* [`disconnectFromEndpoint(...)`](#disconnectfromendpoint)
-* [`disconnect()`](#disconnect)
-* [`sendMessage(...)`](#sendmessage)
-
-</docgen-index>
-
-<docgen-api>
-<!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
-
-### echo(...)
+Here's a simple example of how to use the plugin:
 
 ```typescript
-echo(options: { value: string; }) => Promise<{ value: string; }>
+import { NearbyMultipeer } from '@squareetlabs/capacitor-nearby-multipeer';
+
+// Initialize the plugin
+async function initializeNearby() {
+  try {
+    // Initialize with a unique service ID
+    await NearbyMultipeer.initialize({ serviceId: 'my-unique-service' });
+
+    // Set the connection strategy (optional)
+    await NearbyMultipeer.setStrategy({ strategy: 'P2P_STAR' });
+
+    // Start advertising this device
+    await NearbyMultipeer.startAdvertising({ displayName: 'My Device' });
+
+    // Start discovering other devices
+    await NearbyMultipeer.startDiscovery();
+
+    console.log('Nearby initialized successfully');
+  } catch (error) {
+    console.error('Error initializing Nearby:', error);
+  }
+}
+
+// Connect to a discovered endpoint
+async function connectToEndpoint(endpointId: string) {
+  try {
+    await NearbyMultipeer.connect({ 
+      endpointId: endpointId,
+      displayName: 'My Device'
+    });
+    console.log('Connection request sent');
+  } catch (error) {
+    console.error('Error connecting to endpoint:', error);
+  }
+}
+
+// Send a message to a connected endpoint
+async function sendMessage(endpointId: string, message: string) {
+  try {
+    await NearbyMultipeer.sendMessage({
+      endpointId: endpointId,
+      data: message
+    });
+    console.log('Message sent successfully');
+  } catch (error) {
+    console.error('Error sending message:', error);
+  }
+}
+
+// Disconnect from an endpoint
+async function disconnect(endpointId: string) {
+  await NearbyMultipeer.disconnectFromEndpoint({ endpointId: endpointId });
+  console.log('Disconnected from endpoint');
+}
+
+// Clean up when done
+async function cleanup() {
+  await NearbyMultipeer.stopAdvertising();
+  await NearbyMultipeer.stopDiscovery();
+  await NearbyMultipeer.disconnect(); // Disconnect from all endpoints
+  console.log('Cleaned up Nearby resources');
+}
 ```
 
-Método de prueba para verificar que el plugin funciona
+## Event Handling
 
-| Param         | Type                            |
-| ------------- | ------------------------------- |
-| **`options`** | <code>{ value: string; }</code> |
-
-**Returns:** <code>Promise&lt;{ value: string; }&gt;</code>
-
---------------------
-
-
-### initialize(...)
+This plugin uses events to communicate state changes and incoming data. You should listen for these events to properly handle the peer-to-peer communication:
 
 ```typescript
-initialize(options: { serviceId: string; }) => Promise<void>
+import { NearbyMultipeer } from '@squareetlabs/capacitor-nearby-multipeer';
+
+// Listen for endpoint discovery
+const endpointFoundListener = await NearbyMultipeer.addListener('endpointFound', (event) => {
+  console.log('Endpoint found:', event.endpointId, event.endpointName);
+  // You might want to connect to this endpoint
+});
+
+// Listen for connection requests
+const connectionRequestedListener = await NearbyMultipeer.addListener('connectionRequested', (event) => {
+  console.log('Connection requested from:', event.endpointId, event.endpointName);
+  // Decide whether to accept or reject the connection
+  NearbyMultipeer.acceptConnection({ endpointId: event.endpointId });
+});
+
+// Listen for connection results
+const connectionResultListener = await NearbyMultipeer.addListener('connectionResult', (event) => {
+  console.log('Connection result for:', event.endpointId, 'Status:', event.status);
+  // Status: 0 = success, -1 = error
+});
+
+// Listen for incoming messages
+const messageListener = await NearbyMultipeer.addListener('message', (event) => {
+  console.log('Message from:', event.endpointId, 'Data:', event.data);
+  // Process the received message
+});
+
+// Listen for disconnections
+const endpointLostListener = await NearbyMultipeer.addListener('endpointLost', (event) => {
+  console.log('Disconnected from:', event.endpointId);
+});
+
+// Listen for transfer updates
+const transferUpdateListener = await NearbyMultipeer.addListener('payloadTransferUpdate', (event) => {
+  console.log('Transfer update:', {
+    endpointId: event.endpointId,
+    bytesTransferred: event.bytesTransferred,
+    totalBytes: event.totalBytes,
+    status: event.status // 2 = in progress, 3 = completed
+  });
+});
+
+// Remove individual listeners when done
+function removeListeners() {
+  endpointFoundListener.remove();
+  connectionRequestedListener.remove();
+  connectionResultListener.remove();
+  messageListener.remove();
+  endpointLostListener.remove();
+  transferUpdateListener.remove();
+}
+
+// Or remove all listeners at once
+async function cleanup() {
+  await NearbyMultipeer.removeAllListeners();
+}
 ```
 
-Inicializa el plugin con el identificador de servicio
+## Platform Configuration
 
-| Param         | Type                                | Description                |
-| ------------- | ----------------------------------- | -------------------------- |
-| **`options`** | <code>{ serviceId: string; }</code> | Opciones de inicialización |
+### Android Configuration
 
---------------------
+#### Permissions
 
+This plugin requires several permissions to function properly on Android. Add the following permissions to your `AndroidManifest.xml`:
 
-### setStrategy(...)
+```xml
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:maxSdkVersion="30" android:name="android.permission.BLUETOOTH" />
+<uses-permission android:maxSdkVersion="30" android:name="android.permission.BLUETOOTH_ADMIN" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:minSdkVersion="29" android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:minSdkVersion="31" android:name="android.permission.BLUETOOTH_ADVERTISE" />
+<uses-permission android:minSdkVersion="31" android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:minSdkVersion="31" android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:minSdkVersion="32" android:name="android.permission.NEARBY_WIFI_DEVICES" />
+```
+
+### iOS Configuration
+
+For iOS, the plugin uses the Multipeer Connectivity framework which doesn't require special permissions. However, you should add a description for Bluetooth usage in your `Info.plist`:
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>We use Bluetooth to connect with nearby devices</string>
+<key>NSLocalNetworkUsageDescription</key>
+<string>We use the local network to discover and connect to nearby devices</string>
+```
+
+## API Reference
+
+### Methods
+
+- `initialize(options: { serviceId: string }): Promise<void>`
+- `setStrategy(options: { strategy: string }): Promise<void>`
+- `startAdvertising(options: { displayName?: string }): Promise<void>`
+- `stopAdvertising(): Promise<void>`
+- `startDiscovery(): Promise<void>`
+- `stopDiscovery(): Promise<void>`
+- `connect(options: { endpointId: string, displayName?: string }): Promise<void>`
+- `acceptConnection(options: { endpointId: string }): Promise<void>`
+- `rejectConnection(options: { endpointId: string }): Promise<void>`
+- `disconnectFromEndpoint(options: { endpointId: string }): Promise<void>`
+- `disconnect(): Promise<void>`
+- `sendMessage(options: { endpointId: string, data: string }): Promise<void>`
+
+### Events
+
+- `connectionRequested`: Fired when a connection request is received
+- `connectionResult`: Fired when a connection attempt completes
+- `endpointFound`: Fired when a new endpoint is discovered
+- `endpointLost`: Fired when an endpoint is lost
+- `message`: Fired when a message is received
+- `payloadTransferUpdate`: Fired during payload transfer
+
+### Event Types
 
 ```typescript
-setStrategy(options: { strategy: string; }) => Promise<void>
+interface ConnectionRequestEvent {
+  endpointId: string;
+  endpointName: string;
+  authenticationToken: string;
+  isIncomingConnection: boolean;
+}
+
+interface ConnectionResultEvent {
+  endpointId: string;
+  status: number; // 0 = success, -1 = error
+}
+
+interface EndpointFoundEvent {
+  endpointId: string;
+  endpointName: string;
+  serviceId: string;
+}
+
+interface EndpointLostEvent {
+  endpointId: string;
+}
+
+interface MessageReceivedEvent {
+  endpointId: string;
+  data: string;
+}
+
+interface PayloadTransferUpdateEvent {
+  endpointId: string;
+  bytesTransferred: number;
+  totalBytes: number;
+  status: number; // 2 = in progress, 3 = completed
+}
 ```
-
-Configura la estrategia de conexión a usar
-
-| Param         | Type                               | Description                                                         |
-| ------------- | ---------------------------------- | ------------------------------------------------------------------- |
-| **`options`** | <code>{ strategy: string; }</code> | Estrategia a usar ("P2P_STAR", "P2P_CLUSTER", "P2P_POINT_TO_POINT") |
-
---------------------
-
-
-### startAdvertising(...)
-
-```typescript
-startAdvertising(options: { displayName?: string; }) => Promise<void>
-```
-
-Comienza a anunciar el dispositivo para que otros puedan encontrarlo
-
-| Param         | Type                                   | Description            |
-| ------------- | -------------------------------------- | ---------------------- |
-| **`options`** | <code>{ displayName?: string; }</code> | Opciones de publicidad |
-
---------------------
-
-
-### stopAdvertising()
-
-```typescript
-stopAdvertising() => Promise<void>
-```
-
-Detiene la publicidad del dispositivo
-
---------------------
-
-
-### startDiscovery()
-
-```typescript
-startDiscovery() => Promise<void>
-```
-
-Comienza a buscar dispositivos cercanos
-
---------------------
-
-
-### stopDiscovery()
-
-```typescript
-stopDiscovery() => Promise<void>
-```
-
-Detiene la búsqueda de dispositivos cercanos
-
---------------------
-
-
-### connect(...)
-
-```typescript
-connect(options: { endpointId: string; displayName?: string; }) => Promise<void>
-```
-
-Solicita una conexión a un endpoint encontrado
-
-| Param         | Type                                                       | Description          |
-| ------------- | ---------------------------------------------------------- | -------------------- |
-| **`options`** | <code>{ endpointId: string; displayName?: string; }</code> | Opciones de conexión |
-
---------------------
-
-
-### acceptConnection(...)
-
-```typescript
-acceptConnection(options: { endpointId: string; }) => Promise<void>
-```
-
-Acepta una solicitud de conexión entrante
-
-| Param         | Type                                 | Description                              |
-| ------------- | ------------------------------------ | ---------------------------------------- |
-| **`options`** | <code>{ endpointId: string; }</code> | ID del endpoint que solicita la conexión |
-
---------------------
-
-
-### rejectConnection(...)
-
-```typescript
-rejectConnection(options: { endpointId: string; }) => Promise<void>
-```
-
-Rechaza una solicitud de conexión entrante
-
-| Param         | Type                                 | Description                              |
-| ------------- | ------------------------------------ | ---------------------------------------- |
-| **`options`** | <code>{ endpointId: string; }</code> | ID del endpoint que solicita la conexión |
-
---------------------
-
-
-### disconnectFromEndpoint(...)
-
-```typescript
-disconnectFromEndpoint(options: { endpointId: string; }) => Promise<void>
-```
-
-Desconecta de un endpoint específico
-
-| Param         | Type                                 | Description                   |
-| ------------- | ------------------------------------ | ----------------------------- |
-| **`options`** | <code>{ endpointId: string; }</code> | ID del endpoint a desconectar |
-
---------------------
-
-
-### disconnect()
-
-```typescript
-disconnect() => Promise<void>
-```
-
-Desconecta de todos los endpoints
-
---------------------
-
-
-### sendMessage(...)
-
-```typescript
-sendMessage(options: { endpointId: string; data: string; }) => Promise<void>
-```
-
-Envía un mensaje a un endpoint conectado
-
-| Param         | Type                                               | Description          |
-| ------------- | -------------------------------------------------- | -------------------- |
-| **`options`** | <code>{ endpointId: string; data: string; }</code> | Opciones del mensaje |
-
---------------------
-
-</docgen-api>
