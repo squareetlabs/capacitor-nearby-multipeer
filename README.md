@@ -184,7 +184,7 @@ For iOS, the plugin uses the Multipeer Connectivity framework which doesn't requ
 
 ### Methods
 
-- `initialize(options: { serviceId: string }): Promise<void>`
+- `initialize(options: { serviceId: string, serviceUUIDString?: string }): Promise<void>`
 - `setStrategy(options: { strategy: string }): Promise<void>`
 - `startAdvertising(options: { displayName?: string }): Promise<void>`
 - `stopAdvertising(): Promise<void>`
@@ -243,3 +243,19 @@ interface PayloadTransferUpdateEvent {
   status: number; // 2 = in progress, 3 = completed
 }
 ```
+
+## Inicialización del plugin
+
+```typescript
+import { NearbyMultipeer } from '@squareetlabs/capacitor-nearby-multipeer';
+
+await NearbyMultipeer.initialize({
+  serviceId: 'mi-servicio',
+  serviceUUIDString: 'fa87c0d0-afac-11de-8a39-0800200c9a66' // Opcional, UUID BLE personalizado
+});
+```
+
+- `serviceId`: Identificador lógico del servicio (obligatorio)
+- `serviceUUIDString`: UUID BLE que se usará para el advertising y escaneo (opcional, por defecto: `fa87c0d0-afac-11de-8a39-0800200c9a66`)
+
+Este UUID debe ser el mismo en **Android** e **iOS** para que ambos sistemas puedan descubrirse mutuamente por BLE.

@@ -7,10 +7,13 @@ export interface NearbyMultipeerPlugin {
   echo(options: { value: string }): Promise<{ value: string }>;
 
   /**
-   * Inicializa el plugin con el identificador de servicio
+   * Inicializa el plugin con el identificador de servicio y UUID opcional
    * @param options Opciones de inicialización
+   * @param options.serviceId Identificador lógico del servicio (obligatorio)
+   * @param options.serviceUUIDString UUID BLE personalizado (opcional, por defecto: 'fa87c0d0-afac-11de-8a39-0800200c9a66').
+   *        Debe ser igual en Android e iOS para que ambos sistemas puedan descubrirse por BLE.
    */
-  initialize(options: { serviceId: string }): Promise<void>;
+  initialize(options: { serviceId: string; serviceUUIDString?: string }): Promise<void>;
 
   /**
    * Configura la estrategia de conexión a usar

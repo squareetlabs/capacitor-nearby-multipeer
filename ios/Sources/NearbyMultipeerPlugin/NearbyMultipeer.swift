@@ -13,7 +13,7 @@ import CoreBluetooth
     private var browser: MCNearbyServiceBrowser?
 
     // Bluetooth related properties
-    private static let SERVICE_UUID = CBUUID(string: "FA87C0D0-AFAC-11DE-8A39-0800200C9A66")
+    private var serviceUUID: CBUUID = CBUUID(string: "FA87C0D0-AFAC-11DE-8A39-0800200C9A66")
     private static let CHARACTERISTIC_UUID = CBUUID(string: "34B1CF4D-1069-4AD6-89B6-E161D79BE4D8")
     private var centralManager: CBCentralManager?
     private var peripheralManager: CBPeripheralManager?
@@ -36,9 +36,17 @@ import CoreBluetooth
         return value
     }
 
-    public func initialize(serviceId: String) {
+    public func initialize(serviceId: String, serviceUUIDString: String? = nil) {
         self.serviceId = serviceId
         self.deviceName = "iOS_" + UIDevice.current.name // Prefix to identify iOS devices
+
+        // Permitir configurar el UUID de servicio
+        if let uuidString = serviceUUIDString, !uuidString.isEmpty {
+            let formatted = NearbyMultipeer.formatBleUuid(uuidString)
+            self.serviceUUID = CBUUID(string: formatted)
+        } else {
+            self.serviceUUID = CBUUID(string: "FA87C0D0-AFAC-11DE-8A39-0800200C9A66")
+        }
 
         // Limpiamos recursos anteriores si existen
         cleanup()
@@ -58,7 +66,7 @@ import CoreBluetooth
         centralManager = CBCentralManager(delegate: self, queue: nil)
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
 
-        print("NearbyMultipeer inicializado con serviceId: \(serviceId)")
+        print("NearbyMultipeer inicializado con serviceId: \(serviceId), serviceUUID: \(self.serviceUUID.uuidString)")
     }
 
     public func setDisplayName(displayName: String) {
@@ -116,7 +124,7 @@ import CoreBluetooth
         }
 
         // Create the service
-        let service = CBMutableService(type: NearbyMultipeer.SERVICE_UUID, primary: true)
+        let service = CBMutableService(type: serviceUUID, primary: true)
 
         // Create the characteristic
         serviceCharacteristic = CBMutableCharacteristic(
@@ -134,7 +142,7 @@ import CoreBluetooth
 
         // Start advertising
         peripheralManager.startAdvertising([
-            CBAdvertisementDataServiceUUIDsKey: [NearbyMultipeer.SERVICE_UUID],
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
             CBAdvertisementDataLocalNameKey: deviceName
         ])
 
@@ -189,13 +197,12 @@ import CoreBluetooth
         // Clear previously discovered peripherals
         discoveredPeripherals.removeAll()
 
-        // Start scanning for peripherals with the service UUID
+        // Escanear usando el UUID configurado
         centralManager.scanForPeripherals(
-            withServices: [NearbyMultipeer.SERVICE_UUID],
+            withServices: [serviceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
-
-        print("Bluetooth discovery iniciado")
+        print("Bluetooth discovery iniciado con UUID: \(serviceUUID.uuidString)")
     }
 
     public func stopDiscovery() {
@@ -281,7 +288,8 @@ import CoreBluetooth
             // For MultipeerConnectivity, we need to accept the invitation
             // Find the invitation handler for this peer
             if let peerID = getPeerByEndpointId(endpointId),
-               let invitationHandler = invitationHandlers[peerID] {
+               let invitationHandler = invitationHandlers[peerID],
+               let session = session {
                 // Accept the invitation
                 invitationHandler(true, session)
                 invitationHandlers.removeValue(forKey: peerID)
@@ -295,7 +303,7 @@ import CoreBluetooth
                 print("Conexión MultipeerConnectivity aceptada para: \(endpointId)")
                 delegate?.onSuccess()
             } else {
-                print("No hay invitación pendiente para: \(endpointId)")
+                print("No hay invitación pendiente o MCSession es nil para: \(endpointId)")
                 delegate?.onSuccess()
             }
         }
@@ -314,15 +322,16 @@ import CoreBluetooth
             // For MultipeerConnectivity, we need to reject the invitation
             // Find the invitation handler for this peer
             if let peerID = getPeerByEndpointId(endpointId),
-               let invitationHandler = invitationHandlers[peerID] {
+               let invitationHandler = invitationHandlers[peerID],
+               let session = session {
                 // Reject the invitation
-                invitationHandler(false, nil)
+                invitationHandler(false, session)
                 invitationHandlers.removeValue(forKey: peerID)
 
                 print("Conexión MultipeerConnectivity rechazada para: \(endpointId)")
                 delegate?.onSuccess()
             } else {
-                print("No hay invitación pendiente para: \(endpointId)")
+                print("No hay invitación pendiente o MCSession es nil para: \(endpointId)")
                 delegate?.onSuccess()
             }
         }
@@ -479,6 +488,34 @@ import CoreBluetooth
     private var foundPeers = [MCPeerID]()
     // Mapa para almacenar la información de invitación
     private var invitationHandlers = [MCPeerID: (Bool, MCSession) -> Void]()
+
+    // MARK: - Utilidades de UUID BLE
+    static func formatBleUuid(_ uuid: String) -> String {
+        var uuid = uuid.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if uuid.hasPrefix("0x") {
+            uuid = String(uuid.dropFirst(2))
+        }
+        if uuid.count < 4 {
+            fatalError("UUID inválido")
+        }
+        if uuid.count <= 8 {
+            uuid = uuid.paddingLeft(toLength: 8, withPad: "0") + "-0000-1000-8000-00805f9b34fb"
+        }
+        if !uuid.contains("-") {
+            guard uuid.count == 32 else { fatalError("UUID inválido") }
+            uuid = "\(uuid.prefix(8))-\(uuid.dropFirst(8).prefix(4))-\(uuid.dropFirst(12).prefix(4))-\(uuid.dropFirst(16).prefix(4))-\(uuid.dropFirst(20))"
+        }
+        let groups = uuid.split(separator: "-")
+        guard groups.count == 5,
+              groups[0].count == 8,
+              groups[1].count == 4,
+              groups[2].count == 4,
+              groups[3].count == 4,
+              groups[4].count == 12,
+              groups.allSatisfy({ $0.range(of: "^[0-9a-f]+$", options: .regularExpression) != nil })
+        else { fatalError("UUID inválido") }
+        return uuid
+    }
 }
 
 // MARK: - Protocol para comunicación con el plugin principal
@@ -667,24 +704,29 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        // Get the peripheral name
+        // Loguear todos los dispositivos encontrados
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
+        print("Peripheral encontrado: \(name)")
+        print("UUID: \(peripheral.identifier.uuidString)")
+        print("AdvertisementData: \(advertisementData)")
+        print("RSSI: \(RSSI)")
 
-        // Check if this is an Android device (should start with "Android_")
-        if name.hasPrefix("Android") {
-            print("Dispositivo Android encontrado: \(name), RSSI: \(RSSI)")
-
-            // Store the peripheral
-            let endpointId = peripheral.identifier.uuidString
-            discoveredPeripherals[endpointId] = peripheral
-
-            // Notify the plugin
-            DispatchQueue.main.async {
-                self.delegate?.onEndpointFound(
-                    endpointId: endpointId,
-                    endpointName: name,
-                    serviceId: self.serviceId
-                )
+        // Detectar Android por UUID de servicio y notificar a JS/TS automáticamente
+        if let serviceUUIDs = advertisementData["kCBAdvDataServiceUUIDs"] as? [CBUUID] {
+            for uuid in serviceUUIDs {
+                print("UUID de servicio encontrado: \(uuid.uuidString)")
+                if uuid.uuidString.uppercased() == serviceUUID.uuidString.uppercased() {
+                    print("¡Dispositivo Android detectado por UUID de servicio!")
+                    let endpointId = peripheral.identifier.uuidString
+                    discoveredPeripherals[endpointId] = peripheral
+                    DispatchQueue.main.async {
+                        self.delegate?.onEndpointFound(
+                            endpointId: endpointId,
+                            endpointName: name,
+                            serviceId: self.serviceId
+                        )
+                    }
+                }
             }
         }
     }
@@ -879,5 +921,14 @@ extension NearbyMultipeer: CBPeripheralManagerDelegate {
                 peripheral.respond(to: request, withResult: .requestNotSupported)
             }
         }
+    }
+}
+
+// Extensión para padding de strings
+extension String {
+    func paddingLeft(toLength: Int, withPad character: Character) -> String {
+        let padCount = toLength - self.count
+        guard padCount > 0 else { return self }
+        return String(repeating: character, count: padCount) + self
     }
 }

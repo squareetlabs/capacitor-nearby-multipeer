@@ -20,7 +20,7 @@ export class NearbyMultipeerWeb
     return options;
   }
 
-  async initialize(options: { serviceId: string }): Promise<void> {
+  async initialize(options: { serviceId: string; serviceUUIDString?: string }): Promise<void> {
     console.log('Web implementation not available for Nearby Connections API', options);
     throw this.unavailable('Nearby Connections API not available on web');
   }

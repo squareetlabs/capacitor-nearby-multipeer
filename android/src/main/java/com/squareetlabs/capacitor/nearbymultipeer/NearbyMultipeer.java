@@ -35,6 +35,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseData;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.os.ParcelUuid;
+
 public class NearbyMultipeer {
     private static final String TAG = "NearbyMultipeer";
 
@@ -48,7 +54,7 @@ public class NearbyMultipeer {
     private PayloadCallback payloadCallback;
 
     // Bluetooth related fields
-    private static final UUID SERVICE_UUID = UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
+    private UUID serviceUUID = UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothManager bluetoothManager;
     private Context context;
@@ -93,20 +99,68 @@ public class NearbyMultipeer {
     private Map<String, ConnectedThread> connectedThreads = new HashMap<>();
     private Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    private BluetoothLeAdvertiser bleAdvertiser;
+    private AdvertiseCallback bleAdvertiseCallback;
+
     public NearbyMultipeer() {
         // Constructor por defecto
+    }
+
+    /**
+     * Formatea un UUID BLE a 128 bits estándar.
+     * Acepta formatos cortos, hexadecimales, sin guiones, etc.
+     * Lanza IllegalArgumentException si el UUID no es válido.
+     */
+    public static String formatBleUuid(String uuid) {
+        if (uuid == null) throw new IllegalArgumentException("UUID nulo");
+        uuid = uuid.trim().toLowerCase();
+        if (uuid.startsWith("0x")) {
+            uuid = uuid.substring(2);
+        }
+        if (uuid.length() < 4) {
+            throw new IllegalArgumentException("UUID inválido");
+        }
+        if (uuid.length() <= 8) {
+            uuid = String.format("%8s", uuid).replace(' ', '0') + "-0000-1000-8000-00805f9b34fb";
+        }
+        if (!uuid.contains("-")) {
+            if (uuid.length() != 32) throw new IllegalArgumentException("UUID inválido");
+            uuid = uuid.substring(0, 8) + "-" + uuid.substring(8, 12) + "-" + uuid.substring(12, 16) + "-" + uuid.substring(16, 20) + "-" + uuid.substring(20, 32);
+        }
+        String[] groups = uuid.split("-");
+        if (groups.length != 5 || groups[0].length() != 8 || groups[1].length() != 4 || groups[2].length() != 4 || groups[3].length() != 4 || groups[4].length() != 12) {
+            throw new IllegalArgumentException("UUID inválido");
+        }
+        for (String g : groups) {
+            if (!g.matches("[0-9a-f]+")) throw new IllegalArgumentException("UUID inválido");
+        }
+        return uuid;
     }
 
     public void initialize(Context context, String serviceId,
                           ConnectionLifecycleCallback connectionCallback,
                           EndpointDiscoveryCallback discoveryCallback,
-                          PayloadCallback payloadCallback) {
+                          PayloadCallback payloadCallback,
+                          String serviceUUIDString) {
+        Log.d(TAG, "[initialize] context=" + context + ", serviceId=" + serviceId + ", connectionCallback=" + connectionCallback + ", discoveryCallback=" + discoveryCallback + ", payloadCallback=" + payloadCallback + ", serviceUUIDString=" + serviceUUIDString);
         this.context = context;
         this.serviceId = serviceId;
         this.connectionLifecycleCallback = connectionCallback;
         this.endpointDiscoveryCallback = discoveryCallback;
         this.payloadCallback = payloadCallback;
         this.connectionsClient = Nearby.getConnectionsClient(context);
+        if (serviceUUIDString != null && !serviceUUIDString.isEmpty()) {
+            try {
+                String formatted = formatBleUuid(serviceUUIDString);
+                this.serviceUUID = java.util.UUID.fromString(formatted);
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "UUID de servicio inválido, usando el valor por defecto", e);
+                this.serviceUUID = java.util.UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
+            }
+        } else {
+            this.serviceUUID = java.util.UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
+        }
+        Log.i(TAG, "NearbyMultipeer inicializado con serviceId: " + serviceId + ", serviceUUID: " + this.serviceUUID);
 
         // Initialize Bluetooth
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -204,16 +258,19 @@ public class NearbyMultipeer {
     };
 
     public void setStrategy(Strategy newStrategy) {
+        Log.d(TAG, "[setStrategy] newStrategy=" + newStrategy);
         this.strategy = newStrategy;
         Log.i(TAG, "Estrategia cambiada a: " + strategy.toString());
     }
 
     public String echo(String value) {
+        Log.d(TAG, "[echo] value=" + value);
         Log.i("Echo", value);
         return value;
     }
 
     public void startAdvertising(String displayName, OnResultListener listener) {
+        Log.d(TAG, "[startAdvertising] displayName=" + displayName + ", listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -247,44 +304,66 @@ public class NearbyMultipeer {
     }
 
     private void startBluetoothAdvertising() {
-        if (bluetoothAdapter == null) {
-            Log.e(TAG, "Bluetooth no disponible");
+        Log.d(TAG, "[startBluetoothAdvertising] bluetoothAdapter=" + bluetoothAdapter);
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.e(TAG, "Bluetooth no disponible o no activado");
             return;
         }
 
-        // Check permissions
-        if (!hasBluetoothPermissions()) {
-            Log.e(TAG, "No se tienen permisos para usar Bluetooth");
-            return;
+        // BLE Advertising
+        bleAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+        if (bleAdvertiser == null) {
+            Log.e(TAG, "Este dispositivo no soporta BLE Advertising");
+        } else {
+            AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                    .setConnectable(true)
+                    .build();
+
+            AdvertiseData data = new AdvertiseData.Builder()
+                    .setIncludeDeviceName(true)
+                    .addServiceUuid(new ParcelUuid(serviceUUID))
+                    .build();
+
+            bleAdvertiseCallback = new AdvertiseCallback() {
+                @Override
+                public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+                    Log.i(TAG, "BLE advertising iniciado correctamente con UUID: " + serviceUUID);
+                }
+
+                @Override
+                public void onStartFailure(int errorCode) {
+                    Log.e(TAG, "Error al iniciar BLE advertising: " + errorCode);
+                }
+            };
+
+            bleAdvertiser.startAdvertising(settings, data, bleAdvertiseCallback);
         }
 
-        try {
-            // Make sure Bluetooth is enabled
-            if (!bluetoothAdapter.isEnabled()) {
-                Log.w(TAG, "Bluetooth no está activado");
-                return;
-            }
-        } catch (SecurityException e) {
-            Log.e(TAG, "Error de permisos al verificar estado de Bluetooth", e);
-            return;
-        }
-
-        // Stop any existing advertising
-        stopBluetoothAdvertising();
-
-        // Start the accept thread to listen for incoming connections
+        // Advertising clásico para compatibilidad con iOS
+        stopBluetoothAdvertisingClassic();
         acceptThread = new AcceptThread();
         acceptThread.start();
-
-        Log.i(TAG, "Bluetooth advertising iniciado");
+        Log.i(TAG, "Bluetooth advertising clásico iniciado");
     }
 
     private void stopBluetoothAdvertising() {
+        Log.d(TAG, "[stopBluetoothAdvertising] acceptThread=" + acceptThread + ", serverSocket=" + serverSocket);
+        // Parar BLE Advertising
+        if (bleAdvertiser != null && bleAdvertiseCallback != null) {
+            bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+            Log.i(TAG, "BLE advertising detenido");
+        }
+        // Parar advertising clásico
+        stopBluetoothAdvertisingClassic();
+    }
+
+    private void stopBluetoothAdvertisingClassic() {
         if (acceptThread != null) {
             acceptThread.cancel();
             acceptThread = null;
         }
-
         if (serverSocket != null) {
             try {
                 serverSocket.close();
@@ -296,6 +375,7 @@ public class NearbyMultipeer {
     }
 
     public void stopAdvertising() {
+        Log.d(TAG, "[stopAdvertising] isAdvertising=" + isAdvertising);
         if (connectionsClient != null) {
             connectionsClient.stopAdvertising();
             Log.i(TAG, "Nearby advertising detenido");
@@ -307,6 +387,7 @@ public class NearbyMultipeer {
     }
 
     public void startDiscovery(OnResultListener listener) {
+        Log.d(TAG, "[startDiscovery] listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -339,6 +420,7 @@ public class NearbyMultipeer {
     }
 
     private void startBluetoothDiscovery() {
+        Log.d(TAG, "[startBluetoothDiscovery] bluetoothAdapter=" + bluetoothAdapter);
         if (bluetoothAdapter == null) {
             Log.e(TAG, "Bluetooth no disponible");
             return;
@@ -380,6 +462,7 @@ public class NearbyMultipeer {
     }
 
     private void stopBluetoothDiscovery() {
+        Log.d(TAG, "[stopBluetoothDiscovery] bluetoothAdapter=" + bluetoothAdapter);
         if (bluetoothAdapter == null) return;
 
         // Check permissions
@@ -399,6 +482,7 @@ public class NearbyMultipeer {
     }
 
     public void stopDiscovery() {
+        Log.d(TAG, "[stopDiscovery] isDiscovering=" + isDiscovering);
         if (connectionsClient != null) {
             connectionsClient.stopDiscovery();
             Log.i(TAG, "Nearby discovery detenido");
@@ -410,6 +494,7 @@ public class NearbyMultipeer {
     }
 
     public void requestConnection(String displayName, String endpointId, OnResultListener listener) {
+        Log.d(TAG, "[requestConnection] displayName=" + displayName + ", endpointId=" + endpointId + ", listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -443,6 +528,7 @@ public class NearbyMultipeer {
     }
 
     private void connectToBluetoothDevice(String deviceAddress, OnResultListener listener) {
+        Log.d(TAG, "[connectToBluetoothDevice] deviceAddress=" + deviceAddress + ", listener=" + listener);
         BluetoothDevice device = discoveredDevices.get(deviceAddress);
         if (device == null) {
             listener.onFailure("Dispositivo no encontrado: " + deviceAddress);
@@ -482,6 +568,7 @@ public class NearbyMultipeer {
     }
 
     public void acceptConnection(String endpointId, OnResultListener listener) {
+        Log.d(TAG, "[acceptConnection] endpointId=" + endpointId + ", listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -543,6 +630,7 @@ public class NearbyMultipeer {
     }
 
     public void rejectConnection(String endpointId, OnResultListener listener) {
+        Log.d(TAG, "[rejectConnection] endpointId=" + endpointId + ", listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -584,6 +672,7 @@ public class NearbyMultipeer {
     }
 
     public void sendMessage(String endpointId, String message, OnResultListener listener) {
+        Log.d(TAG, "[sendMessage] endpointId=" + endpointId + ", message=" + message + ", listener=" + listener);
         if (connectionsClient == null) {
             listener.onFailure("No inicializado. Llama a initialize primero.");
             return;
@@ -616,6 +705,7 @@ public class NearbyMultipeer {
     }
 
     public void disconnectFromEndpoint(String endpointId) {
+        Log.d(TAG, "[disconnectFromEndpoint] endpointId=" + endpointId);
         // Check if this is a Bluetooth connection (iOS device)
         ConnectedThread connectedThread = connectedThreads.remove(endpointId);
         if (connectedThread != null) {
@@ -670,6 +760,7 @@ public class NearbyMultipeer {
     }
 
     public void disconnectFromAllEndpoints() {
+        Log.d(TAG, "[disconnectFromAllEndpoints]");
         // Disconnect all Bluetooth connections
         for (ConnectedThread thread : connectedThreads.values()) {
             if (thread != null) {
@@ -705,6 +796,7 @@ public class NearbyMultipeer {
     }
 
     public void cleanup() {
+        Log.d(TAG, "[cleanup]");
         if (connectionsClient != null) {
             stopAdvertising();
             stopDiscovery();

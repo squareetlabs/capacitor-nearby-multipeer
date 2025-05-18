@@ -214,34 +214,34 @@ public class NearbyMultipeerPlugin extends Plugin {
 
         // Si llegamos aquí, todos los permisos están concedidos
         if (call.getData().has("serviceId")) {
-            // Si tenemos un serviceId, procedemos con la inicialización
             String serviceIdValue = call.getString("serviceId");
-            Log.d("NearbyMultipeerPlugin", "Inicializando con serviceId: " + serviceIdValue);
-
+            String serviceUUIDString = call.getString("serviceUUIDString");
+            Log.d("NearbyMultipeerPlugin", "Inicializando con serviceId: " + serviceIdValue + ", serviceUUIDString: " + serviceUUIDString);
             implementation.initialize(getContext(), serviceIdValue, connectionLifecycleCallback,
-                                    endpointDiscoveryCallback, payloadCallback);
+                                    endpointDiscoveryCallback, payloadCallback, serviceUUIDString);
             call.resolve();
         } else {
-            // Si no tenemos serviceId, simplemente resolvemos la llamada
             call.resolve();
         }
     }
 
     @PluginMethod
     public void initialize(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[initialize] call data=" + call.getData().toString());
         String serviceIdValue = call.getString("serviceId");
+        String serviceUUIDString = call.getString("serviceUUIDString");
         if (serviceIdValue == null) {
             call.reject("serviceId is required");
             return;
         }
-
-        // Primero solicitamos los permisos necesarios
-        // El método checkRequiredPermissions manejará la inicialización cuando los permisos estén concedidos
+        // Guardar el UUID temporalmente en el objeto call para usarlo tras los permisos
+        call.set("serviceUUIDString", serviceUUIDString);
         requestRequiredPermissions(call);
     }
 
     @PluginMethod
     public void startAdvertising(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[startAdvertising] call data=" + call.getData().toString());
         String name = call.getString("displayName");
         if (name == null) {
             name = "AndroidDevice";
@@ -262,12 +262,14 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void stopAdvertising(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[stopAdvertising]");
         implementation.stopAdvertising();
         call.resolve();
     }
 
     @PluginMethod
     public void startDiscovery(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[startDiscovery] call data=" + call.getData().toString());
         implementation.startDiscovery(new NearbyMultipeer.OnResultListener() {
             @Override
             public void onSuccess() {
@@ -283,12 +285,14 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void stopDiscovery(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[stopDiscovery]");
         implementation.stopDiscovery();
         call.resolve();
     }
 
     @PluginMethod
     public void connect(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[connect] call data=" + call.getData().toString());
         String endpointId = call.getString("endpointId");
         if (endpointId == null) {
             call.reject("endpointId required");
@@ -315,6 +319,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void acceptConnection(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[acceptConnection] call data=" + call.getData().toString());
         String endpointId = call.getString("endpointId");
         if (endpointId == null) {
             call.reject("endpointId required");
@@ -336,6 +341,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void rejectConnection(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[rejectConnection] call data=" + call.getData().toString());
         String endpointId = call.getString("endpointId");
         if (endpointId == null) {
             call.reject("endpointId required");
@@ -357,12 +363,14 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void disconnect(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[disconnect]");
         implementation.disconnectFromAllEndpoints();
         call.resolve();
     }
 
     @PluginMethod
     public void disconnectFromEndpoint(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[disconnectFromEndpoint] call data=" + call.getData().toString());
         String endpointId = call.getString("endpointId");
         if (endpointId == null) {
             call.reject("endpointId required");
@@ -375,6 +383,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void sendMessage(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[sendMessage] call data=" + call.getData().toString());
         String endpointId = call.getString("endpointId");
         if (endpointId == null) {
             call.reject("endpointId required");
@@ -402,6 +411,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
     @PluginMethod
     public void setStrategy(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[setStrategy] call data=" + call.getData().toString());
         String strategyName = call.getString("strategy");
         if (strategyName == null) {
             call.reject("strategy required");
@@ -431,6 +441,7 @@ public class NearbyMultipeerPlugin extends Plugin {
     private final ConnectionLifecycleCallback connectionLifecycleCallback = new ConnectionLifecycleCallback() {
         @Override
         public void onConnectionInitiated(@NonNull String endpointId, @NonNull ConnectionInfo info) {
+            Log.d("NearbyMultipeerPlugin", "[onConnectionInitiated] endpointId=" + endpointId + ", info=" + info);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             jsObject.put("endpointName", info.getEndpointName());
@@ -441,6 +452,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
         @Override
         public void onConnectionResult(@NonNull String endpointId, @NonNull ConnectionResolution result) {
+            Log.d("NearbyMultipeerPlugin", "[onConnectionResult] endpointId=" + endpointId + ", result=" + result);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             jsObject.put("status", result.getStatus().getStatusCode());
@@ -449,6 +461,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
         @Override
         public void onDisconnected(@NonNull String endpointId) {
+            Log.d("NearbyMultipeerPlugin", "[onDisconnected] endpointId=" + endpointId);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             notifyListeners("endpointLost", jsObject);
@@ -458,6 +471,7 @@ public class NearbyMultipeerPlugin extends Plugin {
     private final EndpointDiscoveryCallback endpointDiscoveryCallback = new EndpointDiscoveryCallback() {
         @Override
         public void onEndpointFound(@NonNull String endpointId, @NonNull DiscoveredEndpointInfo info) {
+            Log.d("NearbyMultipeerPlugin", "[onEndpointFound] endpointId=" + endpointId + ", info=" + info);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             jsObject.put("endpointName", info.getEndpointName());
@@ -467,6 +481,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
         @Override
         public void onEndpointLost(@NonNull String endpointId) {
+            Log.d("NearbyMultipeerPlugin", "[onEndpointLost] endpointId=" + endpointId);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             notifyListeners("endpointLost", jsObject);
@@ -476,6 +491,7 @@ public class NearbyMultipeerPlugin extends Plugin {
     private final PayloadCallback payloadCallback = new PayloadCallback() {
         @Override
         public void onPayloadReceived(@NonNull String endpointId, @NonNull Payload payload) {
+            Log.d("NearbyMultipeerPlugin", "[onPayloadReceived] endpointId=" + endpointId + ", payload=" + payload);
             String msg = new String(payload.asBytes());
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
@@ -485,6 +501,7 @@ public class NearbyMultipeerPlugin extends Plugin {
 
         @Override
         public void onPayloadTransferUpdate(@NonNull String endpointId, @NonNull PayloadTransferUpdate update) {
+            Log.d("NearbyMultipeerPlugin", "[onPayloadTransferUpdate] endpointId=" + endpointId + ", update=" + update);
             JSObject jsObject = new JSObject();
             jsObject.put("endpointId", endpointId);
             jsObject.put("bytesTransferred", update.getBytesTransferred());
