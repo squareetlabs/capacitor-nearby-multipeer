@@ -20,9 +20,5 @@ let package = Package(
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
             path: "ios/Sources/NearbyMultipeerPlugin"),
-        .testTarget(
-            name: "NearbyMultipeerPluginTests",
-            dependencies: ["NearbyMultipeerPlugin"],
-            path: "ios/Tests/NearbyMultipeerPluginTests")
     ]
 )

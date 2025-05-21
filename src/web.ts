@@ -80,6 +80,11 @@ export class NearbyMultipeerWeb
     throw this.unavailable('Nearby Connections API not available on web');
   }
 
+  async setLogLevel(options: { logLevel: number }): Promise<void> {
+    console.log('Web implementation not available for Nearby Connections API', options);
+    throw this.unavailable('Nearby Connections API not available on web');
+  }
+
   addListener(
     eventName: 'connectionRequested',
     listenerFunc: (event: ConnectionRequestEvent) => void

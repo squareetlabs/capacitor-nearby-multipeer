@@ -78,6 +78,13 @@ export interface NearbyMultipeerPlugin {
   sendMessage(options: { endpointId: string, data: string }): Promise<void>;
 
   /**
+   * Establece el nivel de logs del plugin
+   * @param options Opciones de configuración de logs
+   * @param options.logLevel Nivel de logs (0=ninguno, 1=error, 2=warn, 3=info, 4=debug, 5=verbose)
+   */
+  setLogLevel(options: { logLevel: number }): Promise<void>;
+
+  /**
    * Agrega un listener para un evento específico
    * @param eventName Nombre del evento
    * @param listenerFunc Función que maneja el evento

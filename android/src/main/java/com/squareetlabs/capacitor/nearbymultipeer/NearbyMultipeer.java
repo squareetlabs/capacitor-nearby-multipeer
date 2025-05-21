@@ -30,16 +30,25 @@ import com.google.android.gms.nearby.connection.Strategy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import android.bluetooth.le.AdvertiseCallback;
 import android.bluetooth.le.AdvertiseData;
 import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
+import android.bluetooth.le.ScanRecord;
 import android.os.ParcelUuid;
+
+import androidx.annotation.RequiresPermission;
 
 public class NearbyMultipeer {
     private static final String TAG = "NearbyMultipeer";
@@ -55,8 +64,8 @@ public class NearbyMultipeer {
 
     // Bluetooth related fields
     private UUID serviceUUID = UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
+    private static final UUID CHARACTERISTIC_UUID = UUID.fromString("34B1CF4D-1069-4AD6-89B6-E161D79BE4D8");
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothManager bluetoothManager;
     private Context context;
 
     // Permission check helper
@@ -91,14 +100,18 @@ public class NearbyMultipeer {
     private boolean isAdvertising = false;
     private boolean isDiscovering = false;
     private boolean isConnected = false;
-    private Map<String, BluetoothDevice> discoveredDevices = new HashMap<>();
-    private Map<String, BluetoothSocket> connectedSockets = new HashMap<>();
+    private final Map<String, BluetoothDevice> discoveredDevices = new HashMap<>();
+    private final Map<String, BluetoothSocket> connectedSockets = new HashMap<>();
     private BluetoothServerSocket serverSocket;
     private AcceptThread acceptThread;
-    private Map<String, ConnectThread> connectThreads = new HashMap<>();
-    private Map<String, ConnectedThread> connectedThreads = new HashMap<>();
-    private Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Map<String, ConnectThread> connectThreads = new HashMap<>();
+    private final Map<String, ConnectedThread> connectedThreads = new HashMap<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    // BLE variables
+    private BluetoothLeScanner bleScanner;
+    private ScanCallback bleScanCallback;
+    private final Map<String, BluetoothDevice> bleDevices = new HashMap<>();
     private BluetoothLeAdvertiser bleAdvertiser;
     private AdvertiseCallback bleAdvertiseCallback;
 
@@ -163,13 +176,9 @@ public class NearbyMultipeer {
         Log.i(TAG, "NearbyMultipeer inicializado con serviceId: " + serviceId + ", serviceUUID: " + this.serviceUUID);
 
         // Initialize Bluetooth
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
-            if (bluetoothManager != null) {
-                bluetoothAdapter = bluetoothManager.getAdapter();
-            }
-        } else {
-            bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        BluetoothManager bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        if (bluetoothManager != null) {
+            bluetoothAdapter = bluetoothManager.getAdapter();
         }
 
         // Register for broadcasts when a device is discovered
@@ -247,10 +256,32 @@ public class NearbyMultipeer {
                     Log.i(TAG, "Bluetooth turned on");
                     // Restart advertising or discovery if needed
                     if (isAdvertising) {
-                        startBluetoothAdvertising();
+                        // Verificar permisos antes de llamar a startBluetoothAdvertising
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                startBluetoothAdvertising();
+                            } else {
+                                Log.w(TAG, "No se tienen permisos para reiniciar Bluetooth advertising");
+                            }
+                        } else {
+                            startBluetoothAdvertising();
+                        }
                     }
                     if (isDiscovering) {
-                        startBluetoothDiscovery();
+                        // Verificar permisos antes de llamar a startBluetoothDiscovery
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                                    == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                                context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                startBluetoothDiscovery();
+                            } else {
+                                Log.w(TAG, "No se tienen permisos para reiniciar Bluetooth discovery");
+                            }
+                        } else {
+                            startBluetoothDiscovery();
+                        }
                     }
                 }
             }
@@ -288,7 +319,16 @@ public class NearbyMultipeer {
             Log.i(TAG, "Nearby advertising iniciado con éxito");
 
             // Also start Bluetooth advertising for iOS devices
-            startBluetoothAdvertising();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    startBluetoothAdvertising();
+                } else {
+                    Log.w(TAG, "No se tienen permisos para iniciar Bluetooth advertising");
+                }
+            } else {
+                startBluetoothAdvertising();
+            }
 
             isAdvertising = true;
             listener.onSuccess();
@@ -296,13 +336,23 @@ public class NearbyMultipeer {
             Log.e(TAG, "Error al iniciar Nearby advertising", e);
 
             // Try Bluetooth advertising as fallback
-            startBluetoothAdvertising();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    startBluetoothAdvertising();
+                } else {
+                    Log.w(TAG, "No se tienen permisos para iniciar Bluetooth advertising");
+                }
+            } else {
+                startBluetoothAdvertising();
+            }
 
             isAdvertising = true;
             listener.onSuccess();
         });
     }
 
+    @RequiresPermission(value = "android.permission.BLUETOOTH_ADVERTISE")
     private void startBluetoothAdvertising() {
         Log.d(TAG, "[startBluetoothAdvertising] bluetoothAdapter=" + bluetoothAdapter);
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
@@ -314,34 +364,176 @@ public class NearbyMultipeer {
         bleAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
         if (bleAdvertiser == null) {
             Log.e(TAG, "Este dispositivo no soporta BLE Advertising");
-        } else {
-            AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-                    .setConnectable(true)
-                    .build();
+            return;
+        }
 
-            AdvertiseData data = new AdvertiseData.Builder()
+        // Configuración optimizada para máxima visibilidad
+        AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                .setConnectable(true)
+                .setTimeout(0) // No timeout para mantener la conexión activa
+                .build();
+
+        // Datos de fabricante personalizados para ser reconocible por iOS
+        byte[] manufacturerData = new byte[] { 
+            // Magic bytes para identificar nuestro plugin - MUY IMPORTANTE PARA DETECCIÓN
+            0x4E, 0x4D, 0x50, // "NMP" en ASCII (NearbyMultiPeer)
+            // Versión del protocolo
+            0x01,
+            // Tipo de dispositivo (0x01 = Android)
+            0x01
+        };
+        
+        // Añadir el nombre del dispositivo a los datos del fabricante
+        String deviceName = "Android_" + bluetoothAdapter.getName();
+        try {
+            // Convertir nombre a bytes y añadirlo a los datos del fabricante
+            byte[] nameBytes = deviceName.getBytes("UTF-8");
+            byte[] combinedData = new byte[manufacturerData.length + nameBytes.length];
+            System.arraycopy(manufacturerData, 0, combinedData, 0, manufacturerData.length);
+            System.arraycopy(nameBytes, 0, combinedData, manufacturerData.length, nameBytes.length);
+            
+            // Usar los datos combinados
+            manufacturerData = combinedData;
+            BleLogger.info("Nombre de dispositivo añadido a datos del fabricante: " + deviceName);
+            BleLogger.logHexData("Manufacturer Data", manufacturerData);
+        } catch (Exception e) {
+            Log.e(TAG, "Error al añadir nombre del dispositivo a datos del fabricante", e);
+            return;
+        }
+        
+        // Crear el AdvertiseData
+        AdvertiseData data = new AdvertiseData.Builder()
+                .setIncludeDeviceName(true)
+                .setIncludeTxPowerLevel(true)
+                .addServiceUuid(new ParcelUuid(serviceUUID))
+                .addManufacturerData(0x0000, manufacturerData)
+                .build();
+
+        // Iniciar el advertising
+        bleAdvertiseCallback = new AdvertiseCallback() {
+            @Override
+            public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+                Log.i(TAG, "Advertising iniciado con éxito");
+                BleLogger.info("Advertising iniciado con éxito");
+                BleLogger.info("Configuración: " + getModeString(settingsInEffect.getMode()) + ", " + getTxPowerString(settingsInEffect.getTxPowerLevel()));
+                BleLogger.info("Datos de manufacturer: " + BleLogger.bytesToHex(manufacturerData));
+                BleLogger.info("UUID de servicio: " + serviceUUID.toString());
+            }
+
+            @Override
+            public void onStartFailure(int errorCode) {
+                String errorString = getAdvertiseErrorString(errorCode);
+                Log.e(TAG, "Error al iniciar advertising: " + errorString);
+                BleLogger.error("Error al iniciar advertising: " + errorString);
+                
+                // Intentar reiniciar después de un error
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    Log.i(TAG, "Reintentando iniciar advertising...");
+                    startBluetoothAdvertising();
+                }, 5000); // Reintentar después de 5 segundos
+            }
+        };
+                // Bytes importantes que ayudan en la detección
+                0x4E, 0x4D, 0x50, // "NMP" magic bytes
+                0x01, // Versión
+                0x01, // Android
+            };
+            
+            // Añadir nombre del dispositivo a los datos de servicio
+            try {
+                byte[] enhancedServiceData = new byte[serviceData.length + nameBytes.length];
+                System.arraycopy(serviceData, 0, enhancedServiceData, 0, serviceData.length);
+                System.arraycopy(nameBytes, 0, enhancedServiceData, serviceData.length, nameBytes.length);
+                serviceData = enhancedServiceData;
+            } catch (Exception e) {
+                BleLogger.error("Error al añadir nombre a datos de servicio", e);
+            }
+            
+            // Formato 3: Usar solo serviceData y serviceUUID (más simple)
+            AdvertiseData.Builder dataBuilder3 = new AdvertiseData.Builder()
                     .setIncludeDeviceName(true)
                     .addServiceUuid(new ParcelUuid(serviceUUID))
+                    .addServiceData(new ParcelUuid(serviceUUID), serviceData);
+            
+            // Usar alternación de formatos de advertising para mejorar compatibilidad
+            // Iniciar con el formato 3 que parece ser más efectivo
+            AdvertiseData data = dataBuilder3.build();
+            
+            // Datos en respuesta de escaneo - para proveer información adicional
+            AdvertiseData scanResponse = new AdvertiseData.Builder()
+                    .setIncludeTxPowerLevel(true)
+                    .addServiceUuid(new ParcelUuid(CHARACTERISTIC_UUID))
                     .build();
 
+            BleLogger.info("Iniciando BLE advertising con UUID: " + serviceUUID);
+            
+            // Callback para manejar éxito/fracaso del advertising
             bleAdvertiseCallback = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                    Log.i(TAG, "BLE advertising iniciado correctamente con UUID: " + serviceUUID);
+                    BleLogger.info("✅ BLE advertising iniciado correctamente");
+                    BleLogger.info("Modo: " + getModeString(settingsInEffect.getMode()));
+                    BleLogger.info("Potencia: " + getTxPowerString(settingsInEffect.getTxPowerLevel()));
+                    
+                    // Programar cambio de formato de advertising después de 5 segundos
+                    // para que iOS tenga más oportunidades de detectar el dispositivo
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (isAdvertising && bleAdvertiser != null) {
+                            try {
+                                BleLogger.info("🔄 Cambiando a formato de advertising alternativo");
+                                bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+                                bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, bleAdvertiseCallback);
+                            } catch (Exception e) {
+                                BleLogger.error("Error al cambiar formato de advertising", e);
+                            }
+                        }
+                    }, 5000); // 5 segundos
+                    
+                    // Programar otro cambio después de 10 segundos
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (isAdvertising && bleAdvertiser != null) {
+                            try {
+                                BleLogger.info("🔄 Cambiando a formato de advertising final");
+                                bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+                                bleAdvertiser.startAdvertising(settings, dataBuilder2.build(), scanResponse, bleAdvertiseCallback);
+                            } catch (Exception e) {
+                                BleLogger.error("Error al cambiar formato de advertising", e);
+                            }
+                        }
+                    }, 10000); // 10 segundos
                 }
 
                 @Override
                 public void onStartFailure(int errorCode) {
-                    Log.e(TAG, "Error al iniciar BLE advertising: " + errorCode);
+                    BleLogger.error("❌ Error al iniciar BLE advertising: " + getAdvertiseErrorString(errorCode));
+                    
+                    // Si falla, intentar con otro formato
+                    try {
+                        BleLogger.info("🔄 Intentando con formato alternativo tras error");
+                        bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, this);
+                    } catch (Exception e) {
+                        BleLogger.error("Error al iniciar advertising alternativo", e);
+                    }
                 }
             };
 
-            bleAdvertiser.startAdvertising(settings, data, bleAdvertiseCallback);
+            // Iniciar advertising con el formato inicial
+            try {
+                bleAdvertiser.startAdvertising(settings, data, scanResponse, bleAdvertiseCallback);
+            } catch (Exception e) {
+                BleLogger.error("Error al iniciar advertising principal", e);
+                // Intentar con formato alternativo
+                try {
+                    bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, bleAdvertiseCallback);
+                } catch (Exception e2) {
+                    BleLogger.error("Error al iniciar advertising alternativo", e2);
+                }
+            }
         }
 
-        // Advertising clásico para compatibilidad con iOS
+        // Advertising clásico para compatibilidad adicional
         stopBluetoothAdvertisingClassic();
         acceptThread = new AcceptThread();
         acceptThread.start();
@@ -352,8 +544,22 @@ public class NearbyMultipeer {
         Log.d(TAG, "[stopBluetoothAdvertising] acceptThread=" + acceptThread + ", serverSocket=" + serverSocket);
         // Parar BLE Advertising
         if (bleAdvertiser != null && bleAdvertiseCallback != null) {
-            bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
-            Log.i(TAG, "BLE advertising detenido");
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+                        Log.i(TAG, "BLE advertising detenido");
+                    } else {
+                        Log.w(TAG, "No se tienen permisos para detener BLE advertising");
+                    }
+                } else {
+                    bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+                    Log.i(TAG, "BLE advertising detenido");
+                }
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al detener BLE advertising", e);
+            }
         }
         // Parar advertising clásico
         stopBluetoothAdvertisingClassic();
@@ -366,7 +572,18 @@ public class NearbyMultipeer {
         }
         if (serverSocket != null) {
             try {
-                serverSocket.close();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        serverSocket.close();
+                    } else {
+                        Log.w(TAG, "No se tienen permisos para cerrar el servidor Bluetooth");
+                    }
+                } else {
+                    serverSocket.close();
+                }
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al cerrar el servidor Bluetooth", e);
             } catch (IOException e) {
                 Log.e(TAG, "Error al cerrar el servidor Bluetooth", e);
             }
@@ -404,7 +621,18 @@ public class NearbyMultipeer {
             Log.i(TAG, "Nearby discovery iniciado con éxito");
 
             // Also start Bluetooth discovery for iOS devices
-            startBluetoothDiscovery();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    startBluetoothDiscovery();
+                } else {
+                    Log.w(TAG, "No se tienen permisos para iniciar Bluetooth discovery");
+                }
+            } else {
+                startBluetoothDiscovery();
+            }
 
             isDiscovering = true;
             listener.onSuccess();
@@ -412,13 +640,25 @@ public class NearbyMultipeer {
             Log.e(TAG, "Error al iniciar Nearby discovery", e);
 
             // Try Bluetooth discovery as fallback
-            startBluetoothDiscovery();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    startBluetoothDiscovery();
+                } else {
+                    Log.w(TAG, "No se tienen permisos para iniciar Bluetooth discovery");
+                }
+            } else {
+                startBluetoothDiscovery();
+            }
 
             isDiscovering = true;
             listener.onSuccess();
         });
     }
 
+    @RequiresPermission(allOf = {"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT"})
     private void startBluetoothDiscovery() {
         Log.d(TAG, "[startBluetoothDiscovery] bluetoothAdapter=" + bluetoothAdapter);
         if (bluetoothAdapter == null) {
@@ -441,6 +681,9 @@ public class NearbyMultipeer {
 
             // Clear previously discovered devices
             discoveredDevices.clear();
+            
+            // Iniciar escaneo BLE específico
+            startBleScanning();
 
             // Check scan permissions
             if (!hasBluetoothScanPermissions()) {
@@ -454,16 +697,222 @@ public class NearbyMultipeer {
             }
 
             // Start discovery
-            bluetoothAdapter.startDiscovery();
-            Log.i(TAG, "Bluetooth discovery iniciado");
+            if (hasBluetoothScanPermissions()) {
+                bluetoothAdapter.startDiscovery();
+                Log.i(TAG, "Bluetooth discovery clásico iniciado");
+            } else {
+                Log.e(TAG, "No se tienen permisos para iniciar Bluetooth discovery");
+            }
         } catch (SecurityException e) {
             Log.e(TAG, "Error de permisos en operaciones Bluetooth", e);
+        }
+    }
+
+    /**
+     * Inicia el escaneo específico BLE para encontrar dispositivos iOS y Android
+     */
+    @RequiresPermission(value = "android.permission.BLUETOOTH_SCAN")
+    private void startBleScanning() {
+        BleLogger.info("Iniciando escaneo BLE...");
+        bleDevices.clear();
+        
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            BleLogger.error("Bluetooth no disponible o no activado");
+            return;
+        }
+
+        // Obtener scanner BLE
+        bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+        if (bleScanner == null) {
+            BleLogger.error("Este dispositivo no soporta BLE scanning");
+            return;
+        }
+
+        // Filtros para escanear específicamente nuestro servicio
+        List<ScanFilter> filters = new ArrayList<>();
+        ScanFilter serviceFilter = new ScanFilter.Builder()
+                .setServiceUuid(new ParcelUuid(serviceUUID))
+                .build();
+        filters.add(serviceFilter);
+        
+        // También podemos buscar dispositivos por los datos de fabricante personalizados
+        byte[] manufacturerDataMask = new byte[]{ (byte)0xFF, (byte)0xFF, (byte)0xFF }; // Solo comparar los primeros 3 bytes ("NMP")
+        byte[] manufacturerDataFilter = new byte[]{ 0x4E, 0x4D, 0x50 }; // "NMP" en ASCII
+        
+        ScanFilter manufacturerFilter = new ScanFilter.Builder()
+                .setManufacturerData(0xFF, manufacturerDataFilter, manufacturerDataMask)
+                .build();
+        filters.add(manufacturerFilter);
+        
+        // Configuración optimizada para descubrimiento rápido
+        ScanSettings scanSettings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setReportDelay(0) // Reporte inmediato
+                .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+                .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+                .build();
+
+        // Detener escaneo anterior si existe
+        if (bleScanCallback != null) {
+            try {
+                bleScanner.stopScan(bleScanCallback);
+            } catch (Exception e) {
+                BleLogger.error("Error al detener escaneo BLE previo", e);
+            }
+        }
+
+        BleLogger.info("Iniciando escaneo BLE con UUID: " + serviceUUID);
+        
+        bleScanCallback = new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                BluetoothDevice device = result.getDevice();
+                if (device == null) return;
+                
+                String deviceName;
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            deviceName = device.getName();
+                        } else {
+                            deviceName = "Unknown";
+                        }
+                    } else {
+                        deviceName = device.getName();
+                    }
+                } catch (SecurityException e) {
+                    deviceName = "Unknown";
+                    BleLogger.error("Error de permisos al obtener nombre del dispositivo", e);
+                }
+                
+                if (deviceName == null) deviceName = "Unknown";
+                
+                String deviceAddress = device.getAddress();
+                int rssi = result.getRssi();
+                
+                // Para depuración, mostrar todos los dispositivos encontrados
+                BleLogger.debug("Dispositivo BLE encontrado: " + deviceName + " (" + deviceAddress + ") RSSI: " + rssi);
+                
+                // Detectar si es un dispositivo iOS por el nombre o datos de fabricante
+                boolean isIosDevice = false;
+                ScanRecord scanRecord = result.getScanRecord();
+                
+                if (scanRecord != null) {
+                    byte[] manufacturerData = scanRecord.getManufacturerSpecificData(0xFF);
+                    if (manufacturerData != null && manufacturerData.length >= 5) {
+                        // Verificar magic bytes "NMP"
+                        if (manufacturerData[0] == 0x4E && manufacturerData[1] == 0x4D && manufacturerData[2] == 0x50) {
+                            // Verificar tipo de dispositivo (0x02 = iOS)
+                            isIosDevice = manufacturerData[4] == 0x02;
+                            BleLogger.info("Datos de fabricante detectados, es dispositivo iOS: " + isIosDevice);
+                            BleLogger.logHexData("Manufacturer Data", manufacturerData);
+                        }
+                    }
+                }
+                
+                if (deviceName.startsWith("iOS_") || isIosDevice) {
+                    // Es un dispositivo iOS
+                    String serviceId = "iOS_iPhone";
+                    
+                    // Para depuración, mostrar los datos detallados
+                    BleLogger.info("Dispositivo iOS BLE encontrado: " + deviceName);
+                    if (scanRecord != null) {
+                        BleLogger.debug("Datos de advertising: " + scanRecord);
+                        if (scanRecord.getServiceUuids() != null) {
+                            for (ParcelUuid uuid : scanRecord.getServiceUuids()) {
+                                BleLogger.debug("Servicio anunciado: " + uuid.toString());
+                            }
+                        }
+                    }
+                    
+                    // Si ya habíamos detectado este dispositivo, no notificar de nuevo
+                    if (!bleDevices.containsKey(deviceAddress)) {
+                        bleDevices.put(deviceAddress, device);
+                        discoveredDevices.put(deviceAddress, device); // También guardar en la lista general
+                        
+                        // Notificar a través del callback de Nearby
+                        if (endpointDiscoveryCallback != null) {
+                            String finalDeviceName = deviceName;
+                            mainHandler.post(() -> endpointDiscoveryCallback.onEndpointFound(deviceAddress, new DiscoveredEndpointInfo(serviceId, finalDeviceName)));
+                        }
+                    }
+                }
+                else if (deviceName.startsWith("Android_") || (scanRecord != null && scanRecord.getServiceUuids() != null && 
+                        scanRecord.getServiceUuids().contains(new ParcelUuid(serviceUUID)))) {
+                    // Es un dispositivo Android con nuestro servicio
+                    BleLogger.info("Dispositivo Android BLE encontrado: " + deviceName);
+                    String serviceId = "Android_Device";
+                    
+                    // Si ya habíamos detectado este dispositivo, no notificar de nuevo
+                    if (!bleDevices.containsKey(deviceAddress)) {
+                        bleDevices.put(deviceAddress, device);
+                        discoveredDevices.put(deviceAddress, device); // También guardar en la lista general
+                        
+                        // Notificar a través del callback de Nearby
+                        if (endpointDiscoveryCallback != null) {
+                            String finalDeviceName = deviceName;
+                            mainHandler.post(() -> endpointDiscoveryCallback.onEndpointFound(deviceAddress, new DiscoveredEndpointInfo(serviceId, finalDeviceName)));
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onBatchScanResults(List<ScanResult> results) {
+                BleLogger.info("Batch scan results: " + results.size() + " dispositivos");
+                for (ScanResult result : results) {
+                    onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result);
+                }
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                BleLogger.error("BLE scan failed: " + getScanErrorString(errorCode));
+            }
+        };
+
+        try {
+            if (hasBluetoothScanPermissions()) {
+                bleScanner.startScan(filters, scanSettings, bleScanCallback);
+                BleLogger.info("Escaneo BLE iniciado con éxito");
+            } else {
+                BleLogger.error("No se tienen permisos para escanear BLE");
+                throw new SecurityException("No se tienen permisos BLUETOOTH_SCAN");
+            }
+        } catch (SecurityException e) {
+            BleLogger.error("Error de permisos al iniciar escaneo BLE", e);
+        } catch (Exception e) {
+            BleLogger.error("Error al iniciar escaneo BLE", e);
+        }
+    }
+    
+    // Detener escaneo BLE específicamente
+    private void stopBleScanning() {
+        if (bluetoothAdapter == null || bleScanner == null) return;
+        
+        if (bleScanCallback != null) {
+            try {
+                if (hasBluetoothScanPermissions()) {
+                    bleScanner.stopScan(bleScanCallback);
+                    BleLogger.info("Escaneo BLE detenido");
+                } else {
+                    BleLogger.error("No se tienen permisos para detener escaneo BLE");
+                }
+            } catch (SecurityException e) {
+                BleLogger.error("Error de permisos al detener escaneo BLE", e);
+            } catch (Exception e) {
+                BleLogger.error("Error al detener escaneo BLE", e);
+            }
         }
     }
 
     private void stopBluetoothDiscovery() {
         Log.d(TAG, "[stopBluetoothDiscovery] bluetoothAdapter=" + bluetoothAdapter);
         if (bluetoothAdapter == null) return;
+
+        // Detener escaneo BLE
+        stopBleScanning();
 
         // Check permissions
         if (!hasBluetoothScanPermissions()) {
@@ -503,30 +952,49 @@ public class NearbyMultipeer {
         // Check if this is a Bluetooth device (iOS)
         if (discoveredDevices.containsKey(endpointId)) {
             // This is an iOS device, connect via Bluetooth
-            connectToBluetoothDevice(endpointId, listener);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    connectToBluetoothDevice(endpointId, listener);
+                } else {
+                    Log.e(TAG, "No se tienen permisos para conectar con dispositivos Bluetooth");
+                    listener.onFailure("No se tienen permisos para conectar con dispositivos Bluetooth");
+                }
+            } else {
+                connectToBluetoothDevice(endpointId, listener);
+            }
         } else {
             // This is an Android device, connect via Nearby
             Log.i(TAG, "Solicitando conexión a endpoint Nearby: " + endpointId);
-            connectionsClient.requestConnection(
-                    displayName,
-                    endpointId,
-                    connectionLifecycleCallback
-            ).addOnSuccessListener(unused -> {
-                Log.i(TAG, "Solicitud de conexión Nearby enviada con éxito");
+            try {
+                connectionsClient.requestConnection(
+                        displayName,
+                        endpointId,
+                        connectionLifecycleCallback
+                ).addOnSuccessListener(unused -> {
+                    Log.i(TAG, "Solicitud de conexión Nearby enviada con éxito");
 
-                // Stop advertising once connected
-                if (isAdvertising) {
-                    stopAdvertising();
-                }
+                    // Stop advertising once connected
+                    if (isAdvertising) {
+                        stopAdvertising();
+                    }
 
-                listener.onSuccess();
-            }).addOnFailureListener(e -> {
+                    listener.onSuccess();
+                }).addOnFailureListener(e -> {
+                    Log.e(TAG, "Error al solicitar conexión Nearby", e);
+                    listener.onFailure("Error al solicitar conexión: " + e.getMessage());
+                });
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al solicitar conexión Nearby", e);
+                listener.onFailure("Error de permisos: " + e.getMessage());
+            } catch (Exception e) {
                 Log.e(TAG, "Error al solicitar conexión Nearby", e);
-                listener.onFailure("Error al solicitar conexión: " + e.getMessage());
-            });
+                listener.onFailure("Error: " + e.getMessage());
+            }
         }
     }
 
+    @RequiresPermission(allOf = {"android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN"})
     private void connectToBluetoothDevice(String deviceAddress, OnResultListener listener) {
         Log.d(TAG, "[connectToBluetoothDevice] deviceAddress=" + deviceAddress + ", listener=" + listener);
         BluetoothDevice device = discoveredDevices.get(deviceAddress);
@@ -610,22 +1078,30 @@ public class NearbyMultipeer {
         } else {
             // This is a Nearby connection (Android device)
             Log.i(TAG, "Aceptando conexión de endpoint Nearby: " + endpointId);
-            connectionsClient.acceptConnection(endpointId, payloadCallback)
-                    .addOnSuccessListener(unused -> {
-                        Log.i(TAG, "Conexión Nearby aceptada con éxito");
+            try {
+                connectionsClient.acceptConnection(endpointId, payloadCallback)
+                        .addOnSuccessListener(unused -> {
+                            Log.i(TAG, "Conexión Nearby aceptada con éxito");
 
-                        // Stop advertising once connected
-                        if (isAdvertising) {
-                            stopAdvertising();
-                        }
+                            // Stop advertising once connected
+                            if (isAdvertising) {
+                                stopAdvertising();
+                            }
 
-                        isConnected = true;
-                        listener.onSuccess();
-                    })
-                    .addOnFailureListener(e -> {
-                        Log.e(TAG, "Error al aceptar conexión Nearby", e);
-                        listener.onFailure("Error al aceptar conexión: " + e.getMessage());
-                    });
+                            isConnected = true;
+                            listener.onSuccess();
+                        })
+                        .addOnFailureListener(e -> {
+                            Log.e(TAG, "Error al aceptar conexión Nearby", e);
+                            listener.onFailure("Error al aceptar conexión: " + e.getMessage());
+                        });
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al aceptar conexión Nearby", e);
+                listener.onFailure("Error de permisos: " + e.getMessage());
+            } catch (Exception e) {
+                Log.e(TAG, "Error al aceptar conexión Nearby", e);
+                listener.onFailure("Error: " + e.getMessage());
+            }
         }
     }
 
@@ -659,15 +1135,23 @@ public class NearbyMultipeer {
         } else {
             // This is a Nearby connection (Android device)
             Log.i(TAG, "Rechazando conexión de endpoint Nearby: " + endpointId);
-            connectionsClient.rejectConnection(endpointId)
-                    .addOnSuccessListener(unused -> {
-                        Log.i(TAG, "Conexión Nearby rechazada con éxito");
-                        listener.onSuccess();
-                    })
-                    .addOnFailureListener(e -> {
-                        Log.e(TAG, "Error al rechazar conexión Nearby", e);
-                        listener.onFailure("Error al rechazar conexión: " + e.getMessage());
-                    });
+            try {
+                connectionsClient.rejectConnection(endpointId)
+                        .addOnSuccessListener(unused -> {
+                            Log.i(TAG, "Conexión Nearby rechazada con éxito");
+                            listener.onSuccess();
+                        })
+                        .addOnFailureListener(e -> {
+                            Log.e(TAG, "Error al rechazar conexión Nearby", e);
+                            listener.onFailure("Error al rechazar conexión: " + e.getMessage());
+                        });
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al rechazar conexión Nearby", e);
+                listener.onFailure("Error de permisos: " + e.getMessage());
+            } catch (Exception e) {
+                Log.e(TAG, "Error al rechazar conexión Nearby", e);
+                listener.onFailure("Error: " + e.getMessage());
+            }
         }
     }
 
@@ -692,15 +1176,23 @@ public class NearbyMultipeer {
             Payload payload = Payload.fromBytes(bytes);
 
             Log.i(TAG, "Enviando mensaje a endpoint Nearby: " + endpointId);
-            connectionsClient.sendPayload(endpointId, payload)
-                    .addOnSuccessListener(unused -> {
-                        Log.i(TAG, "Mensaje Nearby enviado con éxito");
-                        listener.onSuccess();
-                    })
-                    .addOnFailureListener(e -> {
-                        Log.e(TAG, "Error al enviar mensaje Nearby", e);
-                        listener.onFailure("Error al enviar mensaje: " + e.getMessage());
-                    });
+            try {
+                connectionsClient.sendPayload(endpointId, payload)
+                        .addOnSuccessListener(unused -> {
+                            Log.i(TAG, "Mensaje Nearby enviado con éxito");
+                            listener.onSuccess();
+                        })
+                        .addOnFailureListener(e -> {
+                            Log.e(TAG, "Error al enviar mensaje Nearby", e);
+                            listener.onFailure("Error al enviar mensaje: " + e.getMessage());
+                        });
+            } catch (SecurityException e) {
+                Log.e(TAG, "Error de permisos al enviar mensaje Nearby", e);
+                listener.onFailure("Error de permisos: " + e.getMessage());
+            } catch (Exception e) {
+                Log.e(TAG, "Error al enviar mensaje Nearby", e);
+                listener.onFailure("Error: " + e.getMessage());
+            }
         }
     }
 
@@ -724,8 +1216,18 @@ public class NearbyMultipeer {
 
             // Resume advertising after disconnection
             if (!isAdvertising && !isConnected) {
-                startBluetoothAdvertising();
-                isAdvertising = true;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        startBluetoothAdvertising();
+                        isAdvertising = true;
+                    } else {
+                        Log.w(TAG, "No se tienen permisos para reiniciar Bluetooth advertising");
+                    }
+                } else {
+                    startBluetoothAdvertising();
+                    isAdvertising = true;
+                }
             }
 
             Log.i(TAG, "Desconectado del endpoint Bluetooth: " + endpointId);
@@ -788,8 +1290,18 @@ public class NearbyMultipeer {
 
         // Resume advertising after disconnection
         if (!isAdvertising && !isConnected) {
-            startBluetoothAdvertising();
-            isAdvertising = true;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    startBluetoothAdvertising();
+                    isAdvertising = true;
+                } else {
+                    Log.w(TAG, "No se tienen permisos para reiniciar Bluetooth advertising");
+                }
+            } else {
+                startBluetoothAdvertising();
+                isAdvertising = true;
+            }
         }
 
         Log.i(TAG, "Desconectado de todos los endpoints");
@@ -830,7 +1342,7 @@ public class NearbyMultipeer {
 
             try {
                 // Create a new listening server socket
-                serverSocket = bluetoothAdapter.listenUsingRfcommWithServiceRecord("NearbyMultipeer", SERVICE_UUID);
+                serverSocket = bluetoothAdapter.listenUsingRfcommWithServiceRecord("NearbyMultipeer", serviceUUID);
                 Log.d(TAG, "Servidor Bluetooth creado");
             } catch (SecurityException e) {
                 Log.e(TAG, "Error de permisos al crear el servidor Bluetooth", e);
@@ -927,7 +1439,7 @@ public class NearbyMultipeer {
                 // Check permissions before creating socket
                 if (hasBluetoothPermissions()) {
                     // Get a BluetoothSocket for a connection with the given BluetoothDevice
-                    tmp = device.createRfcommSocketToServiceRecord(SERVICE_UUID);
+                    tmp = device.createRfcommSocketToServiceRecord(serviceUUID);
                 } else {
                     Log.e(TAG, "No se tienen permisos para crear socket Bluetooth");
                 }
@@ -1156,6 +1668,68 @@ public class NearbyMultipeer {
             } else {
                 Log.w(TAG, "No se tienen permisos para cerrar socket Bluetooth");
             }
+        }
+    }
+
+    // Utilidades para logging detallado
+    private String getModeString(int mode) {
+        switch (mode) {
+            case AdvertiseSettings.ADVERTISE_MODE_LOW_POWER:
+                return "ADVERTISE_MODE_LOW_POWER";
+            case AdvertiseSettings.ADVERTISE_MODE_BALANCED:
+                return "ADVERTISE_MODE_BALANCED";
+            case AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY:
+                return "ADVERTISE_MODE_LOW_LATENCY";
+            default:
+                return "UNKNOWN MODE: " + mode;
+        }
+    }
+    
+    private String getTxPowerString(int txPowerLevel) {
+        switch (txPowerLevel) {
+            case AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW:
+                return "ADVERTISE_TX_POWER_ULTRA_LOW";
+            case AdvertiseSettings.ADVERTISE_TX_POWER_LOW:
+                return "ADVERTISE_TX_POWER_LOW";
+            case AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM:
+                return "ADVERTISE_TX_POWER_MEDIUM";
+            case AdvertiseSettings.ADVERTISE_TX_POWER_HIGH:
+                return "ADVERTISE_TX_POWER_HIGH";
+            default:
+                return "UNKNOWN TX POWER: " + txPowerLevel;
+        }
+    }
+    
+    private String getAdvertiseErrorString(int errorCode) {
+        switch (errorCode) {
+            case AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED:
+                return "ADVERTISE_FAILED_ALREADY_STARTED";
+            case AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE:
+                return "ADVERTISE_FAILED_DATA_TOO_LARGE";
+            case AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
+                return "ADVERTISE_FAILED_FEATURE_UNSUPPORTED";
+            case AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR:
+                return "ADVERTISE_FAILED_INTERNAL_ERROR";
+            case AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
+                return "ADVERTISE_FAILED_TOO_MANY_ADVERTISERS";
+            default:
+                return "UNKNOWN ERROR: " + errorCode;
+        }
+    }
+
+    // Utilidad para convertir códigos de error de escaneo a texto
+    private String getScanErrorString(int errorCode) {
+        switch (errorCode) {
+            case ScanCallback.SCAN_FAILED_ALREADY_STARTED:
+                return "SCAN_FAILED_ALREADY_STARTED";
+            case ScanCallback.SCAN_FAILED_APPLICATION_REGISTRATION_FAILED:
+                return "SCAN_FAILED_APPLICATION_REGISTRATION_FAILED";
+            case ScanCallback.SCAN_FAILED_FEATURE_UNSUPPORTED:
+                return "SCAN_FAILED_FEATURE_UNSUPPORTED";
+            case ScanCallback.SCAN_FAILED_INTERNAL_ERROR:
+                return "SCAN_FAILED_INTERNAL_ERROR";
+            default:
+                return "UNKNOWN ERROR: " + errorCode;
         }
     }
 }

@@ -22,7 +22,8 @@ public class NearbyMultipeerPlugin: CAPPlugin, CAPBridgedPlugin, NearbyMultipeer
         CAPPluginMethod(name: "rejectConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnectFromEndpoint", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "sendMessage", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "sendMessage", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setLogLevel", returnType: CAPPluginReturnPromise)
     ]
     
     private let implementation = NearbyMultipeer()
@@ -141,6 +142,20 @@ public class NearbyMultipeerPlugin: CAPPlugin, CAPBridgedPlugin, NearbyMultipeer
         
         lastCall = call
         implementation.sendMessage(endpointId: endpointId, message: data)
+    }
+    
+    @objc func setLogLevel(_ call: CAPPluginCall) {
+        let logLevel = call.getInt("logLevel", 3) // default: info
+        
+        guard let level = BleLogger.LogLevel(rawValue: logLevel) else {
+            call.reject("Nivel de log inválido")
+            return
+        }
+        
+        BleLogger.logLevel = level
+        BleLogger.info("Nivel de log establecido a: \(level)")
+        
+        call.resolve()
     }
     
     // MARK: - NearbyMultipeerDelegate

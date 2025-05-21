@@ -229,13 +229,10 @@ public class NearbyMultipeerPlugin extends Plugin {
     public void initialize(PluginCall call) {
         Log.d("NearbyMultipeerPlugin", "[initialize] call data=" + call.getData().toString());
         String serviceIdValue = call.getString("serviceId");
-        String serviceUUIDString = call.getString("serviceUUIDString");
         if (serviceIdValue == null) {
             call.reject("serviceId is required");
             return;
         }
-        // Guardar el UUID temporalmente en el objeto call para usarlo tras los permisos
-        call.set("serviceUUIDString", serviceUUIDString);
         requestRequiredPermissions(call);
     }
 
@@ -258,6 +255,13 @@ public class NearbyMultipeerPlugin extends Plugin {
                 call.reject("Advertising failed: " + error);
             }
         });
+    }
+
+    @PluginMethod
+    public void cleanup(PluginCall call) {
+        Log.d("NearbyMultipeerPlugin", "[cleanup]");
+        implementation.stopAdvertising();
+        call.resolve();
     }
 
     @PluginMethod
@@ -435,6 +439,41 @@ public class NearbyMultipeerPlugin extends Plugin {
         }
 
         implementation.setStrategy(strategy);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setLogLevel(PluginCall call) {
+        Integer logLevelValue = call.getInt("logLevel", 3); // default: info
+        
+        BleLogger.LogLevel level;
+        switch (logLevelValue) {
+            case 0:
+                level = BleLogger.LogLevel.NONE;
+                break;
+            case 1:
+                level = BleLogger.LogLevel.ERROR;
+                break;
+            case 2:
+                level = BleLogger.LogLevel.WARN;
+                break;
+            case 3:
+                level = BleLogger.LogLevel.INFO;
+                break;
+            case 4:
+                level = BleLogger.LogLevel.DEBUG;
+                break;
+            case 5:
+                level = BleLogger.LogLevel.VERBOSE;
+                break;
+            default:
+                level = BleLogger.LogLevel.INFO;
+                break;
+        }
+        
+        BleLogger.setLogLevel(level);
+        BleLogger.info("Nivel de log establecido a: " + level.name());
+        
         call.resolve();
     }
 

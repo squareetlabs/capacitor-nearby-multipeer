@@ -8,6 +8,8 @@ Capacitor plugin for Google Nearby & iOS Multipeer Connectivity. This plugin ena
 - Bluetooth support for direct device-to-device communication
 - Automatic fallback to Bluetooth when Nearby Connections is not available
 - Simple API for advertising, discovery, and message exchange
+- Proper permission handling for Android 12+ (API 31+)
+- Shared BLE characteristic UUID between Android and iOS for improved cross-platform compatibility
 
 ## Install
 
@@ -169,6 +171,34 @@ This plugin requires several permissions to function properly on Android. Add th
 <uses-permission android:minSdkVersion="32" android:name="android.permission.NEARBY_WIFI_DEVICES" />
 ```
 
+#### Requesting Permissions
+
+For Android 12+ (API 31+), you need to request Bluetooth permissions at runtime. Here's an example of how to do this:
+
+```typescript
+import { Permissions } from '@capacitor/core';
+
+async function requestBluetoothPermissions() {
+  if (Capacitor.getPlatform() === 'android') {
+    const permissions = [
+      'android.permission.BLUETOOTH_SCAN',
+      'android.permission.BLUETOOTH_CONNECT',
+      'android.permission.BLUETOOTH_ADVERTISE'
+    ];
+    
+    for (const permission of permissions) {
+      const status = await Permissions.query({ name: permission });
+      if (status.state !== 'granted') {
+        await Permissions.request({ name: permission });
+      }
+    }
+  }
+}
+
+// Call this before initializing the plugin
+await requestBluetoothPermissions();
+```
+
 ### iOS Configuration
 
 For iOS, the plugin uses the Multipeer Connectivity framework which doesn't require special permissions. However, you should add a description for Bluetooth usage in your `Info.plist`:
@@ -179,6 +209,17 @@ For iOS, the plugin uses the Multipeer Connectivity framework which doesn't requ
 <key>NSLocalNetworkUsageDescription</key>
 <string>We use the local network to discover and connect to nearby devices</string>
 ```
+
+## Technical Details
+
+### BLE Implementation
+
+The plugin uses Bluetooth Low Energy (BLE) for cross-platform communication between Android and iOS:
+
+- Both platforms use a common Service UUID: `fa87c0d0-afac-11de-8a39-0800200c9a66`
+- Both platforms use a common Characteristic UUID: `34B1CF4D-1069-4AD6-89B6-E161D79BE4D8`
+
+These shared identifiers ensure that devices can discover and communicate with each other across platforms.
 
 ## API Reference
 

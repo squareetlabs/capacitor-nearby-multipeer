@@ -18,6 +18,13 @@ import CoreBluetooth
     private var centralManager: CBCentralManager?
     private var peripheralManager: CBPeripheralManager?
     private var discoveredPeripherals = [String: CBPeripheral]()
+    private var bleDevicesFound: Int = 0
+    
+    // Estructura para almacenar información de dispositivos descubiertos
+    private struct DiscoveredPeripheral {
+        let peripheral: CBPeripheral
+        let name: String
+    }
     private var connectedPeripherals = [String: CBPeripheral]()
     private var transferCharacteristic: CBCharacteristic?
     private var serviceCharacteristic: CBMutableCharacteristic?
@@ -113,40 +120,61 @@ import CoreBluetooth
 
     private func startBluetoothAdvertising() {
         guard let peripheralManager = peripheralManager else {
-            print("Bluetooth peripheral manager no disponible")
+            BleLogger.error("Peripheral manager no disponible")
             return
         }
-
-        // Check if Bluetooth is powered on
+        
+        // Verificar si Bluetooth está activado
         if peripheralManager.state != .poweredOn {
-            print("Bluetooth no está activado")
+            BleLogger.error("Bluetooth no está activado")
             return
         }
-
-        // Create the service
+        
+        // Crear un servicio con el UUID específico
         let service = CBMutableService(type: serviceUUID, primary: true)
-
-        // Create the characteristic
-        serviceCharacteristic = CBMutableCharacteristic(
-            type: NearbyMultipeer.CHARACTERISTIC_UUID,
+        
+        // Crear una característica para comunicación
+        let characteristic = CBMutableCharacteristic(
+            type: CBUUID(string: "FA87C0D1-AFAC-11DE-8A39-0800200C9A66"), // Característica derivada del UUID principal
             properties: [.read, .write, .notify],
             value: nil,
             permissions: [.readable, .writeable]
         )
-
-        // Add the characteristic to the service
-        service.characteristics = [serviceCharacteristic!]
-
-        // Add the service to the peripheral manager
+        
+        // Añadir la característica al servicio
+        service.characteristics = [characteristic]
+        
+        // Añadir el servicio al peripheral manager
         peripheralManager.add(service)
-
-        // Start advertising
-        peripheralManager.startAdvertising([
-            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
-            CBAdvertisementDataLocalNameKey: deviceName
+        
+        // Datos de fabricante personalizados (debe coincidir con Android)
+        var manufacturerData = Data([
+            // Magic bytes para identificar nuestro plugin
+            0x4E, 0x4D, 0x50, // "NMP" en ASCII (NearbyMultiPeer)
+            // Versión del protocolo
+            0x01,
+            // Tipo de dispositivo (0x02 = iOS)
+            0x02
         ])
-
-        print("Bluetooth advertising iniciado")
+        
+        // Datos adicionales sobre el dispositivo (opcional)
+        let deviceInfo = deviceName.data(using: .utf8) ?? Data()
+        manufacturerData.append(deviceInfo.prefix(10)) // Limitamos a 10 bytes
+        
+        // Datos de advertising
+        let advertisementData: [String: Any] = [
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
+            CBAdvertisementDataLocalNameKey: deviceName,
+            CBAdvertisementDataManufacturerDataKey: manufacturerData
+        ]
+        
+        BleLogger.info("Iniciando BLE advertising con UUID: \(serviceUUID.uuidString)")
+        BleLogger.logHexData("Datos de fabricante personalizados", data: manufacturerData)
+        
+        // Iniciar la publicación
+        peripheralManager.startAdvertising(advertisementData)
+        
+        BleLogger.info("BLE advertising iniciado con nombre: \(deviceName)")
     }
 
     public func stopAdvertising() {
@@ -196,13 +224,60 @@ import CoreBluetooth
 
         // Clear previously discovered peripherals
         discoveredPeripherals.removeAll()
-
-        // Escanear usando el UUID configurado
+        bleDevicesFound = 0
+        
+        BleLogger.info("🔍 Iniciando escaneo BLE para detectar dispositivos Android")
+        BleLogger.info("🔌 Servicio principal a buscar: \(serviceUUID.uuidString)")
+        
+        // Añadir log para verificar antes de comenzar el escaneo
+        BleLogger.info("⚠️ DIAGNOSTICO: bleDevicesFound antes de escaneo = \(bleDevicesFound)")
+        
+        // Escanear sin servicios primero para capturar todos los dispositivos
         centralManager.scanForPeripherals(
-            withServices: [serviceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            withServices: nil,
+            options: [
+                CBCentralManagerScanOptionAllowDuplicatesKey: true
+            ]
         )
-        print("Bluetooth discovery iniciado con UUID: \(serviceUUID.uuidString)")
+        
+        BleLogger.info("📡 Escaneo BLE iniciado en modo amplio sin filtrar por UUID")
+        
+        // Programar una verificación después de 3 segundos para ver si se detectan dispositivos
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            if self.isDiscovering {
+                BleLogger.info("⚠️ DIAGNOSTICO después de 3 segundos: \(self.bleDevicesFound) dispositivos encontrados")
+                
+                if self.bleDevicesFound == 0 {
+                    BleLogger.error("❌ No se ha detectado ningún dispositivo BLE después de 3 segundos")
+                    BleLogger.info("🔄 Reiniciando escaneo con diferentes parámetros...")
+                    
+                    // Reintentar con diferentes opciones de escaneo
+                    self.centralManager?.stopScan()
+                    self.centralManager?.scanForPeripherals(
+                        withServices: nil,
+                        options: [
+                            CBCentralManagerScanOptionAllowDuplicatesKey: true
+                        ]
+                    )
+                } else {
+                    BleLogger.info("✅ Escaneo detectando dispositivos correctamente")
+                }
+            }
+        }
+        
+        // Programar un segundo escaneo específico para el UUID después de 6 segundos
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            if self.isDiscovering {
+                BleLogger.info("🔎 Cambiando a modo de escaneo específico por UUID después de 6 segundos")
+                BleLogger.info("⚠️ DIAGNOSTICO: \(self.bleDevicesFound) dispositivos encontrados hasta ahora")
+                
+                self.centralManager?.stopScan()
+                self.centralManager?.scanForPeripherals(
+                    withServices: [self.serviceUUID],
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+                )
+            }
+        }
     }
 
     public func stopDiscovery() {
@@ -704,29 +779,97 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        // Incrementar contador de dispositivos encontrados (antes de cualquier filtrado)
+        bleDevicesFound += 1
+        
         // Loguear todos los dispositivos encontrados
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-        print("Peripheral encontrado: \(name)")
-        print("UUID: \(peripheral.identifier.uuidString)")
-        print("AdvertisementData: \(advertisementData)")
-        print("RSSI: \(RSSI)")
-
-        // Detectar Android por UUID de servicio y notificar a JS/TS automáticamente
-        if let serviceUUIDs = advertisementData["kCBAdvDataServiceUUIDs"] as? [CBUUID] {
-            for uuid in serviceUUIDs {
-                print("UUID de servicio encontrado: \(uuid.uuidString)")
-                if uuid.uuidString.uppercased() == serviceUUID.uuidString.uppercased() {
-                    print("¡Dispositivo Android detectado por UUID de servicio!")
-                    let endpointId = peripheral.identifier.uuidString
-                    discoveredPeripherals[endpointId] = peripheral
-                    DispatchQueue.main.async {
-                        self.delegate?.onEndpointFound(
-                            endpointId: endpointId,
-                            endpointName: name,
-                            serviceId: self.serviceId
-                        )
+        
+        // Log detallado del advertisementData para depuración
+        BleLogger.info("🔍 Dispositivo BLE #\(bleDevicesFound) encontrado: \(name)")
+        BleLogger.info("📱 UUID: \(peripheral.identifier.uuidString)")
+        BleLogger.info("📶 RSSI: \(RSSI.intValue) dBm")
+        
+        // Log detallado de cada campo del advertisementData
+        for (key, value) in advertisementData {
+            let valueStr = String(describing: value)
+            BleLogger.debug("📦 [\(key)]: \(valueStr)")
+            
+            // Si hay datos del fabricante, mostrarlos en hexadecimal
+            if key == CBAdvertisementDataManufacturerDataKey, let data = value as? Data {
+                let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+                BleLogger.debug("🧩 Manufacturer Data (HEX): \(hexString)")
+                
+                // Comprobar si contiene "NMP" (0x4E 0x4D 0x50) en cualquier posición
+                var foundNMP = false
+                for i in 0..<max(0, data.count - 2) {
+                    if data[i] == 0x4E && data[i+1] == 0x4D && data[i+2] == 0x50 {
+                        foundNMP = true
+                        BleLogger.info("✅ Secuencia 'NMP' encontrada en posición \(i)")
+                        break
                     }
                 }
+                
+                if !foundNMP {
+                    BleLogger.debug("❌ Secuencia 'NMP' NO encontrada en los datos")
+                }
+            }
+            
+            // Si hay UUIDs de servicio, mostrarlos individualmente
+            if key == CBAdvertisementDataServiceUUIDsKey, let uuids = value as? [CBUUID] {
+                for (index, uuid) in uuids.enumerated() {
+                    BleLogger.debug("🔌 Service UUID \(index+1): \(uuid.uuidString)")
+                    
+                    // Comprobar si coincide con nuestro UUID de servicio
+                    if uuid == serviceUUID {
+                        BleLogger.info("✅ UUID coincide con nuestro serviceUUID")
+                    } else {
+                        BleLogger.debug("UUID diferente al esperado")
+                    }
+                }
+            }
+            
+            // Si hay datos de servicio, mostrarlos en hexadecimal
+            if key == CBAdvertisementDataServiceDataKey, let serviceData = value as? [CBUUID: Data] {
+                for (serviceUUID, data) in serviceData {
+                    let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+                    BleLogger.debug("🔧 Service Data para \(serviceUUID.uuidString): \(hexString)")
+        }
+        
+        // Verificar datos del fabricante para identificar dispositivos Android
+        var isAndroidDevice = false
+        var deviceType: UInt8 = 0
+        var deviceName: String?
+        
+        if let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data {
+            // Verificar si los primeros 3 bytes son "NMP"
+            if manufacturerData.count >= 3 &&
+               manufacturerData[0] == 0x4E &&
+               manufacturerData[1] == 0x4D &&
+               manufacturerData[2] == 0x50 {
+            }
+        }
+        
+        // IMPORTANTE: En modo diagnóstico, notificamos TODOS los dispositivos BLE
+        // aunque no sean detectados como Android, para determinar si hay problemas de detección
+        if shouldNotifyDevice || name.contains("_") {
+            let endpointId = peripheral.identifier.uuidString
+            BleLogger.info("🔔 Notificando dispositivo: \(endpointName) (\(isAndroidDevice ? "Android" : "Tipo desconocido"))")
+            BleLogger.info("🧩 Razón: \(detectionReason)")
+            
+            // Si ya habíamos descubierto este dispositivo, no notificar de nuevo
+            if discoveredPeripherals[endpointId] == nil {
+                discoveredPeripherals[endpointId] = peripheral
+                
+                // Notificar al delegate
+                DispatchQueue.main.async {
+                    self.delegate?.onEndpointFound(
+                        endpointId: endpointId, 
+                        endpointName: endpointName, 
+                        serviceId: "BLE_Device"
+                    )
+                }
+                BleLogger.info("✅ Nuevo dispositivo notificado: \(endpointId) (\(endpointName))")
             }
         }
     }
@@ -739,7 +882,7 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
         connectedPeripherals[endpointId] = peripheral
 
         // Discover services
-        peripheral.discoverServices([NearbyMultipeer.SERVICE_UUID])
+        peripheral.discoverServices([serviceUUID])
 
         // Set connected flag
         isConnected = true

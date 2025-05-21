@@ -1,6 +1,6 @@
 {
   "name": "@squareetlabs/capacitor-nearby-multipeer",
-  "version": "1.1.15",
+  "version": "1.1.23",
   "description": "Capacitor plugin for Google Nearby & iOS Multipeer Connectivity",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
