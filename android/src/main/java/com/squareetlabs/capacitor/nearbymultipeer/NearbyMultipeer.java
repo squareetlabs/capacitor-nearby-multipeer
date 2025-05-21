@@ -258,7 +258,7 @@ public class NearbyMultipeer {
                     if (isAdvertising) {
                         // Verificar permisos antes de llamar a startBluetoothAdvertising
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                                     == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                                 startBluetoothAdvertising();
                             } else {
@@ -271,9 +271,9 @@ public class NearbyMultipeer {
                     if (isDiscovering) {
                         // Verificar permisos antes de llamar a startBluetoothDiscovery
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN)
                                     == android.content.pm.PackageManager.PERMISSION_GRANTED &&
-                                context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                                context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                                     == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                                 startBluetoothDiscovery();
                             } else {
@@ -320,7 +320,7 @@ public class NearbyMultipeer {
 
             // Also start Bluetooth advertising for iOS devices
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     startBluetoothAdvertising();
                 } else {
@@ -337,7 +337,7 @@ public class NearbyMultipeer {
 
             // Try Bluetooth advertising as fallback
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     startBluetoothAdvertising();
                 } else {
@@ -371,169 +371,77 @@ public class NearbyMultipeer {
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-                .setConnectable(true)
-                .setTimeout(0) // No timeout para mantener la conexión activa
+                .setConnectable(true) // Important for allowing connections
+                .setTimeout(0) // No timeout to keep advertising
                 .build();
 
-        // Datos de fabricante personalizados para ser reconocible por iOS
-        byte[] manufacturerData = new byte[] { 
-            // Magic bytes para identificar nuestro plugin - MUY IMPORTANTE PARA DETECCIÓN
-            0x4E, 0x4D, 0x50, // "NMP" en ASCII (NearbyMultiPeer)
-            // Versión del protocolo
-            0x01,
-            // Tipo de dispositivo (0x01 = Android)
-            0x01
+        // Datos de fabricante personalizados: NMP, v1, Android
+        byte[] manufacturerDataBytes = new byte[] {
+            (byte)0x4E, (byte)0x4D, (byte)0x50, // "NMP"
+            (byte)0x01,                         // Protocol version 1
+            (byte)0x01                          // Device type Android (0x01)
         };
-        
-        // Añadir el nombre del dispositivo a los datos del fabricante
-        String deviceName = "Android_" + bluetoothAdapter.getName();
-        try {
-            // Convertir nombre a bytes y añadirlo a los datos del fabricante
-            byte[] nameBytes = deviceName.getBytes("UTF-8");
-            byte[] combinedData = new byte[manufacturerData.length + nameBytes.length];
-            System.arraycopy(manufacturerData, 0, combinedData, 0, manufacturerData.length);
-            System.arraycopy(nameBytes, 0, combinedData, manufacturerData.length, nameBytes.length);
-            
-            // Usar los datos combinados
-            manufacturerData = combinedData;
-            BleLogger.info("Nombre de dispositivo añadido a datos del fabricante: " + deviceName);
-            BleLogger.logHexData("Manufacturer Data", manufacturerData);
-        } catch (Exception e) {
-            Log.e(TAG, "Error al añadir nombre del dispositivo a datos del fabricante", e);
-            return;
-        }
-        
-        // Crear el AdvertiseData
-        AdvertiseData data = new AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
-                .setIncludeTxPowerLevel(true)
-                .addServiceUuid(new ParcelUuid(serviceUUID))
-                .addManufacturerData(0x0000, manufacturerData)
+
+        // Optional: Append device name to manufacturer data if needed and if space allows.
+        // For now, keeping it separate to ensure the core manufacturer data is minimal and clear.
+        // String deviceName = "Android_" + bluetoothAdapter.getName();
+        // byte[] nameBytes = deviceName.getBytes("UTF-8");
+        // byte[] combinedData = new byte[manufacturerDataBytes.length + nameBytes.length];
+        // System.arraycopy(manufacturerDataBytes, 0, combinedData, 0, manufacturerDataBytes.length);
+        // System.arraycopy(nameBytes, 0, combinedData, manufacturerDataBytes.length, nameBytes.length);
+        // manufacturerDataBytes = combinedData; // If combining
+
+        AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
+                .addServiceUuid(new ParcelUuid(serviceUUID)) // Include the main service UUID
+                .addManufacturerData(0x0000, manufacturerDataBytes) // Use a common manufacturer ID, e.g., 0x0000 or 0xFFFF
+                .setIncludeDeviceName(true); // Including device name can be useful for debugging
+
+        AdvertiseData data = dataBuilder.build();
+
+        // Scan response can be minimal or null
+        AdvertiseData scanResponse = new AdvertiseData.Builder()
+                .setIncludeTxPowerLevel(true) // Example minimal information
+                // Optionally include device name in scan response if not in main advertisement packet due to size constraints
+                // .setIncludeDeviceName(true)
                 .build();
 
-        // Iniciar el advertising
-        bleAdvertiseCallback = new AdvertiseCallback() {
-            @Override
-            public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                Log.i(TAG, "Advertising iniciado con éxito");
-                BleLogger.info("Advertising iniciado con éxito");
-                BleLogger.info("Configuración: " + getModeString(settingsInEffect.getMode()) + ", " + getTxPowerString(settingsInEffect.getTxPowerLevel()));
-                BleLogger.info("Datos de manufacturer: " + BleLogger.bytesToHex(manufacturerData));
-                BleLogger.info("UUID de servicio: " + serviceUUID.toString());
-            }
-
-            @Override
-            public void onStartFailure(int errorCode) {
-                String errorString = getAdvertiseErrorString(errorCode);
-                Log.e(TAG, "Error al iniciar advertising: " + errorString);
-                BleLogger.error("Error al iniciar advertising: " + errorString);
-                
-                // Intentar reiniciar después de un error
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    Log.i(TAG, "Reintentando iniciar advertising...");
-                    startBluetoothAdvertising();
-                }, 5000); // Reintentar después de 5 segundos
-            }
-        };
-                // Bytes importantes que ayudan en la detección
-                0x4E, 0x4D, 0x50, // "NMP" magic bytes
-                0x01, // Versión
-                0x01, // Android
-            };
-            
-            // Añadir nombre del dispositivo a los datos de servicio
-            try {
-                byte[] enhancedServiceData = new byte[serviceData.length + nameBytes.length];
-                System.arraycopy(serviceData, 0, enhancedServiceData, 0, serviceData.length);
-                System.arraycopy(nameBytes, 0, enhancedServiceData, serviceData.length, nameBytes.length);
-                serviceData = enhancedServiceData;
-            } catch (Exception e) {
-                BleLogger.error("Error al añadir nombre a datos de servicio", e);
-            }
-            
-            // Formato 3: Usar solo serviceData y serviceUUID (más simple)
-            AdvertiseData.Builder dataBuilder3 = new AdvertiseData.Builder()
-                    .setIncludeDeviceName(true)
-                    .addServiceUuid(new ParcelUuid(serviceUUID))
-                    .addServiceData(new ParcelUuid(serviceUUID), serviceData);
-            
-            // Usar alternación de formatos de advertising para mejorar compatibilidad
-            // Iniciar con el formato 3 que parece ser más efectivo
-            AdvertiseData data = dataBuilder3.build();
-            
-            // Datos en respuesta de escaneo - para proveer información adicional
-            AdvertiseData scanResponse = new AdvertiseData.Builder()
-                    .setIncludeTxPowerLevel(true)
-                    .addServiceUuid(new ParcelUuid(CHARACTERISTIC_UUID))
-                    .build();
-
-            BleLogger.info("Iniciando BLE advertising con UUID: " + serviceUUID);
-            
-            // Callback para manejar éxito/fracaso del advertising
+        if (bleAdvertiseCallback == null) {
             bleAdvertiseCallback = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                    BleLogger.info("✅ BLE advertising iniciado correctamente");
-                    BleLogger.info("Modo: " + getModeString(settingsInEffect.getMode()));
-                    BleLogger.info("Potencia: " + getTxPowerString(settingsInEffect.getTxPowerLevel()));
-                    
-                    // Programar cambio de formato de advertising después de 5 segundos
-                    // para que iOS tenga más oportunidades de detectar el dispositivo
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        if (isAdvertising && bleAdvertiser != null) {
-                            try {
-                                BleLogger.info("🔄 Cambiando a formato de advertising alternativo");
-                                bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
-                                bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, bleAdvertiseCallback);
-                            } catch (Exception e) {
-                                BleLogger.error("Error al cambiar formato de advertising", e);
-                            }
-                        }
-                    }, 5000); // 5 segundos
-                    
-                    // Programar otro cambio después de 10 segundos
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        if (isAdvertising && bleAdvertiser != null) {
-                            try {
-                                BleLogger.info("🔄 Cambiando a formato de advertising final");
-                                bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
-                                bleAdvertiser.startAdvertising(settings, dataBuilder2.build(), scanResponse, bleAdvertiseCallback);
-                            } catch (Exception e) {
-                                BleLogger.error("Error al cambiar formato de advertising", e);
-                            }
-                        }
-                    }, 10000); // 10 segundos
+                    Log.i(TAG, "BLE Advertising started successfully.");
+                    BleLogger.info("BLE Advertising started successfully. Settings: " + settingsInEffect.toString());
+                    BleLogger.logHexData("Manufacturer Data being advertised", manufacturerDataBytes);
                 }
 
                 @Override
                 public void onStartFailure(int errorCode) {
-                    BleLogger.error("❌ Error al iniciar BLE advertising: " + getAdvertiseErrorString(errorCode));
-                    
-                    // Si falla, intentar con otro formato
-                    try {
-                        BleLogger.info("🔄 Intentando con formato alternativo tras error");
-                        bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, this);
-                    } catch (Exception e) {
-                        BleLogger.error("Error al iniciar advertising alternativo", e);
-                    }
+                    String errorString = getAdvertiseErrorString(errorCode);
+                    Log.e(TAG, "BLE Advertising onStartFailure: " + errorString);
+                    BleLogger.error("BLE Advertising onStartFailure: " + errorString);
+                    // Potentially retry or log error more permanently
                 }
             };
-
-            // Iniciar advertising con el formato inicial
-            try {
-                bleAdvertiser.startAdvertising(settings, data, scanResponse, bleAdvertiseCallback);
-            } catch (Exception e) {
-                BleLogger.error("Error al iniciar advertising principal", e);
-                // Intentar con formato alternativo
-                try {
-                    bleAdvertiser.startAdvertising(settings, dataBuilder1.build(), scanResponse, bleAdvertiseCallback);
-                } catch (Exception e2) {
-                    BleLogger.error("Error al iniciar advertising alternativo", e2);
-                }
-            }
         }
 
-        // Advertising clásico para compatibilidad adicional
+        try {
+            if (bleAdvertiser != null) {
+                 // Stop any previous advertising before starting new one
+                bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
+                // Start advertising
+                bleAdvertiser.startAdvertising(settings, data, scanResponse, bleAdvertiseCallback);
+                BleLogger.info("Attempting to start BLE advertising...");
+            } else {
+                 BleLogger.error("bleAdvertiser is null, cannot start advertising.");
+            }
+        } catch (SecurityException se) {
+            BleLogger.error("SecurityException while starting BLE advertising: " + se.getMessage(), se);
+        } catch (Exception e) {
+            BleLogger.error("Exception while starting BLE advertising: " + e.getMessage(), e);
+        }
+    }
+
+    // Advertising clásico para compatibilidad adicional
         stopBluetoothAdvertisingClassic();
         acceptThread = new AcceptThread();
         acceptThread.start();
@@ -546,7 +454,7 @@ public class NearbyMultipeer {
         if (bleAdvertiser != null && bleAdvertiseCallback != null) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                             == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         bleAdvertiser.stopAdvertising(bleAdvertiseCallback);
                         Log.i(TAG, "BLE advertising detenido");
@@ -573,7 +481,7 @@ public class NearbyMultipeer {
         if (serverSocket != null) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                             == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         serverSocket.close();
                     } else {
@@ -622,9 +530,9 @@ public class NearbyMultipeer {
 
             // Also start Bluetooth discovery for iOS devices
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED &&
-                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     startBluetoothDiscovery();
                 } else {
@@ -641,9 +549,9 @@ public class NearbyMultipeer {
 
             // Try Bluetooth discovery as fallback
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) 
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED &&
-                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     startBluetoothDiscovery();
                 } else {
@@ -681,7 +589,7 @@ public class NearbyMultipeer {
 
             // Clear previously discovered devices
             discoveredDevices.clear();
-            
+
             // Iniciar escaneo BLE específico
             startBleScanning();
 
@@ -715,7 +623,7 @@ public class NearbyMultipeer {
     private void startBleScanning() {
         BleLogger.info("Iniciando escaneo BLE...");
         bleDevices.clear();
-        
+
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
             BleLogger.error("Bluetooth no disponible o no activado");
             return;
@@ -733,17 +641,39 @@ public class NearbyMultipeer {
         ScanFilter serviceFilter = new ScanFilter.Builder()
                 .setServiceUuid(new ParcelUuid(serviceUUID))
                 .build();
-        filters.add(serviceFilter);
-        
-        // También podemos buscar dispositivos por los datos de fabricante personalizados
-        byte[] manufacturerDataMask = new byte[]{ (byte)0xFF, (byte)0xFF, (byte)0xFF }; // Solo comparar los primeros 3 bytes ("NMP")
-        byte[] manufacturerDataFilter = new byte[]{ 0x4E, 0x4D, 0x50 }; // "NMP" en ASCII
-        
+        // filters.add(serviceFilter); // Service UUID filter can be primary if manufacturer data is less reliable.
+
+        // Filter for iOS devices: NMP, v1, iOS type (0x02)
+        // Manufacturer ID should match what iOS is advertising with, if it sets one.
+        // Assuming iOS doesn't set a specific manufacturer ID that we can filter by,
+        // we rely on the content of the manufacturer data.
+        // However, if Android sets manufacturer ID 0x0000, iOS should look for that.
+        // For scanning iOS, iOS advertises with CBAdvertisementDataManufacturerDataKey.
+        // The manufacturer ID is part of this data.
+        // Android's ScanFilter's manufacturerId (first param of setManufacturerData) is to filter specific company's beacons.
+        // For custom data, often this ID is not the filter criteria, but the data itself.
+        // Let's try with 0x0000 if iOS is expected to use that, or if iOS doesn't set one, this field might be ignored if data matches.
+
+        byte[] manufacturerDataFilterBytes = new byte[]{
+            (byte)0x4E, (byte)0x4D, (byte)0x50, // "NMP"
+            (byte)0x01,                         // Protocol version 1
+            (byte)0x02                          // Device type iOS (0x02)
+        };
+        byte[] manufacturerDataMaskBytes = new byte[]{
+            (byte)0xFF, (byte)0xFF, (byte)0xFF,
+            (byte)0xFF,
+            (byte)0xFF
+        };
+
         ScanFilter manufacturerFilter = new ScanFilter.Builder()
-                .setManufacturerData(0xFF, manufacturerDataFilter, manufacturerDataMask)
+                .setManufacturerData(0x0000, manufacturerDataFilterBytes, manufacturerDataMaskBytes) // Matching ID 0x0000
                 .build();
         filters.add(manufacturerFilter);
-        
+
+        // Also, add a filter for the service UUID as iOS should be advertising this.
+        filters.add(serviceFilter);
+
+
         // Configuración optimizada para descubrimiento rápido
         ScanSettings scanSettings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -762,17 +692,17 @@ public class NearbyMultipeer {
         }
 
         BleLogger.info("Iniciando escaneo BLE con UUID: " + serviceUUID);
-        
+
         bleScanCallback = new ScanCallback() {
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
                 BluetoothDevice device = result.getDevice();
                 if (device == null) return;
-                
+
                 String deviceName;
                 try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) 
+                        if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                                 == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                             deviceName = device.getName();
                         } else {
@@ -785,36 +715,74 @@ public class NearbyMultipeer {
                     deviceName = "Unknown";
                     BleLogger.error("Error de permisos al obtener nombre del dispositivo", e);
                 }
-                
+
                 if (deviceName == null) deviceName = "Unknown";
-                
+
                 String deviceAddress = device.getAddress();
                 int rssi = result.getRssi();
-                
+
                 // Para depuración, mostrar todos los dispositivos encontrados
                 BleLogger.debug("Dispositivo BLE encontrado: " + deviceName + " (" + deviceAddress + ") RSSI: " + rssi);
-                
+
                 // Detectar si es un dispositivo iOS por el nombre o datos de fabricante
                 boolean isIosDevice = false;
                 ScanRecord scanRecord = result.getScanRecord();
-                
+
                 if (scanRecord != null) {
-                    byte[] manufacturerData = scanRecord.getManufacturerSpecificData(0xFF);
+                    // Attempt to get manufacturer data using the ID 0x0000
+                    byte[] manufacturerData = scanRecord.getManufacturerSpecificData(0x0000);
+                    if (manufacturerData == null) {
+                        // Fallback if 0x0000 returns no data, try iterating common IDs or checking all.
+                        // For now, let's assume 0x0000 is what we're looking for or that getManufacturerSpecificData(id) can be tricky.
+                        // A more robust way is to parse all service data or manufacturer data fields if the ID is uncertain.
+                        // However, the filter should have already pre-qualified this.
+                        Map<Integer, byte[]> allManufacturerData = scanRecord.getManufacturerSpecificData();
+                        if(allManufacturerData != null && !allManufacturerData.isEmpty()){
+                             // Log all manufacturer data found
+                            for(Map.Entry<Integer, byte[]> entry : allManufacturerData.entrySet()){
+                                BleLogger.debug("Found Manufacturer Data with ID: " + entry.getKey());
+                                BleLogger.logHexData("Data for ID " + entry.getKey(), entry.getValue());
+                                if(entry.getKey() == 0x0000) { // Or check if any matches the expected pattern
+                                    manufacturerData = entry.getValue();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     if (manufacturerData != null && manufacturerData.length >= 5) {
-                        // Verificar magic bytes "NMP"
-                        if (manufacturerData[0] == 0x4E && manufacturerData[1] == 0x4D && manufacturerData[2] == 0x50) {
-                            // Verificar tipo de dispositivo (0x02 = iOS)
-                            isIosDevice = manufacturerData[4] == 0x02;
-                            BleLogger.info("Datos de fabricante detectados, es dispositivo iOS: " + isIosDevice);
-                            BleLogger.logHexData("Manufacturer Data", manufacturerData);
+                        // Verify NMP, protocol version, and iOS device type
+                        if (manufacturerData[0] == (byte)0x4E &&
+                            manufacturerData[1] == (byte)0x4D &&
+                            manufacturerData[2] == (byte)0x50 && // NMP
+                            manufacturerData[3] == (byte)0x01 && // Protocol v1
+                            manufacturerData[4] == (byte)0x02) { // Device Type iOS
+                            isIosDevice = true;
+                            BleLogger.info("iOS device identified via Manufacturer Data. Name: " + deviceName);
+                            BleLogger.logHexData("Matching Manufacturer Data", manufacturerData);
+                            // Optional: Extract device name if iOS appends it after these 5 bytes
+                            if (manufacturerData.length > 5) {
+                                try {
+                                    String extractedName = new String(manufacturerData, 5, manufacturerData.length - 5, "UTF-8");
+                                    BleLogger.info("Extracted name from iOS manufacturer data: " + extractedName);
+                                    // deviceName = extractedName; // Could override if this is more reliable
+                                } catch (Exception e) {
+                                    BleLogger.error("Error decoding name from iOS manufacturer data", e);
+                                }
+                            }
                         }
                     }
                 }
-                
-                if (deviceName.startsWith("iOS_") || isIosDevice) {
-                    // Es un dispositivo iOS
-                    String serviceId = "iOS_iPhone";
-                    
+
+                // Fallback: Check if device name starts with "iOS_" if manufacturer data check fails
+                if (!isIosDevice && deviceName != null && deviceName.toLowerCase().startsWith("ios_")) {
+                    BleLogger.info("iOS device identified by name prefix: " + deviceName);
+                    isIosDevice = true;
+                }
+
+                if (isIosDevice) {
+                    String discoveredServiceId = "BLE_iOS_Device"; // More specific service ID
+
                     // Para depuración, mostrar los datos detallados
                     BleLogger.info("Dispositivo iOS BLE encontrado: " + deviceName);
                     if (scanRecord != null) {
@@ -825,12 +793,12 @@ public class NearbyMultipeer {
                             }
                         }
                     }
-                    
+
                     // Si ya habíamos detectado este dispositivo, no notificar de nuevo
                     if (!bleDevices.containsKey(deviceAddress)) {
                         bleDevices.put(deviceAddress, device);
                         discoveredDevices.put(deviceAddress, device); // También guardar en la lista general
-                        
+
                         // Notificar a través del callback de Nearby
                         if (endpointDiscoveryCallback != null) {
                             String finalDeviceName = deviceName;
@@ -838,17 +806,17 @@ public class NearbyMultipeer {
                         }
                     }
                 }
-                else if (deviceName.startsWith("Android_") || (scanRecord != null && scanRecord.getServiceUuids() != null && 
+                else if (deviceName.startsWith("Android_") || (scanRecord != null && scanRecord.getServiceUuids() != null &&
                         scanRecord.getServiceUuids().contains(new ParcelUuid(serviceUUID)))) {
                     // Es un dispositivo Android con nuestro servicio
                     BleLogger.info("Dispositivo Android BLE encontrado: " + deviceName);
                     String serviceId = "Android_Device";
-                    
+
                     // Si ya habíamos detectado este dispositivo, no notificar de nuevo
                     if (!bleDevices.containsKey(deviceAddress)) {
                         bleDevices.put(deviceAddress, device);
                         discoveredDevices.put(deviceAddress, device); // También guardar en la lista general
-                        
+
                         // Notificar a través del callback de Nearby
                         if (endpointDiscoveryCallback != null) {
                             String finalDeviceName = deviceName;
@@ -886,11 +854,11 @@ public class NearbyMultipeer {
             BleLogger.error("Error al iniciar escaneo BLE", e);
         }
     }
-    
+
     // Detener escaneo BLE específicamente
     private void stopBleScanning() {
         if (bluetoothAdapter == null || bleScanner == null) return;
-        
+
         if (bleScanCallback != null) {
             try {
                 if (hasBluetoothScanPermissions()) {
@@ -1217,7 +1185,7 @@ public class NearbyMultipeer {
             // Resume advertising after disconnection
             if (!isAdvertising && !isConnected) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                             == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         startBluetoothAdvertising();
                         isAdvertising = true;
@@ -1291,7 +1259,7 @@ public class NearbyMultipeer {
         // Resume advertising after disconnection
         if (!isAdvertising && !isConnected) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) 
+                if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     startBluetoothAdvertising();
                     isAdvertising = true;
@@ -1684,7 +1652,7 @@ public class NearbyMultipeer {
                 return "UNKNOWN MODE: " + mode;
         }
     }
-    
+
     private String getTxPowerString(int txPowerLevel) {
         switch (txPowerLevel) {
             case AdvertiseSettings.ADVERTISE_TX_POWER_ULTRA_LOW:
@@ -1699,7 +1667,7 @@ public class NearbyMultipeer {
                 return "UNKNOWN TX POWER: " + txPowerLevel;
         }
     }
-    
+
     private String getAdvertiseErrorString(int errorCode) {
         switch (errorCode) {
             case AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED:

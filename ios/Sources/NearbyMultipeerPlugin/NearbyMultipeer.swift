@@ -2,7 +2,7 @@ import Foundation
 import MultipeerConnectivity
 import CoreBluetooth
 
-@objc public class NearbyMultipeer: NSObject {
+@objc public class NearbyMultipeer: NSObject, CBPeripheralManagerDelegate, CBPeripheralDelegate {
 
     // MARK: - Properties
 
@@ -19,7 +19,7 @@ import CoreBluetooth
     private var peripheralManager: CBPeripheralManager?
     private var discoveredPeripherals = [String: CBPeripheral]()
     private var bleDevicesFound: Int = 0
-    
+
     // Estructura para almacenar información de dispositivos descubiertos
     private struct DiscoveredPeripheral {
         let peripheral: CBPeripheral
@@ -123,16 +123,16 @@ import CoreBluetooth
             BleLogger.error("Peripheral manager no disponible")
             return
         }
-        
+
         // Verificar si Bluetooth está activado
         if peripheralManager.state != .poweredOn {
             BleLogger.error("Bluetooth no está activado")
             return
         }
-        
+
         // Crear un servicio con el UUID específico
         let service = CBMutableService(type: serviceUUID, primary: true)
-        
+
         // Crear una característica para comunicación
         let characteristic = CBMutableCharacteristic(
             type: CBUUID(string: "FA87C0D1-AFAC-11DE-8A39-0800200C9A66"), // Característica derivada del UUID principal
@@ -140,13 +140,13 @@ import CoreBluetooth
             value: nil,
             permissions: [.readable, .writeable]
         )
-        
+
         // Añadir la característica al servicio
         service.characteristics = [characteristic]
-        
+
         // Añadir el servicio al peripheral manager
         peripheralManager.add(service)
-        
+
         // Datos de fabricante personalizados (debe coincidir con Android)
         var manufacturerData = Data([
             // Magic bytes para identificar nuestro plugin
@@ -156,24 +156,24 @@ import CoreBluetooth
             // Tipo de dispositivo (0x02 = iOS)
             0x02
         ])
-        
+
         // Datos adicionales sobre el dispositivo (opcional)
         let deviceInfo = deviceName.data(using: .utf8) ?? Data()
         manufacturerData.append(deviceInfo.prefix(10)) // Limitamos a 10 bytes
-        
+
         // Datos de advertising
         let advertisementData: [String: Any] = [
             CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
             CBAdvertisementDataLocalNameKey: deviceName,
             CBAdvertisementDataManufacturerDataKey: manufacturerData
         ]
-        
+
         BleLogger.info("Iniciando BLE advertising con UUID: \(serviceUUID.uuidString)")
         BleLogger.logHexData("Datos de fabricante personalizados", data: manufacturerData)
-        
+
         // Iniciar la publicación
         peripheralManager.startAdvertising(advertisementData)
-        
+
         BleLogger.info("BLE advertising iniciado con nombre: \(deviceName)")
     }
 
@@ -225,13 +225,13 @@ import CoreBluetooth
         // Clear previously discovered peripherals
         discoveredPeripherals.removeAll()
         bleDevicesFound = 0
-        
+
         BleLogger.info("🔍 Iniciando escaneo BLE para detectar dispositivos Android")
         BleLogger.info("🔌 Servicio principal a buscar: \(serviceUUID.uuidString)")
-        
+
         // Añadir log para verificar antes de comenzar el escaneo
         BleLogger.info("⚠️ DIAGNOSTICO: bleDevicesFound antes de escaneo = \(bleDevicesFound)")
-        
+
         // Escanear sin servicios primero para capturar todos los dispositivos
         centralManager.scanForPeripherals(
             withServices: nil,
@@ -239,18 +239,18 @@ import CoreBluetooth
                 CBCentralManagerScanOptionAllowDuplicatesKey: true
             ]
         )
-        
+
         BleLogger.info("📡 Escaneo BLE iniciado en modo amplio sin filtrar por UUID")
-        
+
         // Programar una verificación después de 3 segundos para ver si se detectan dispositivos
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             if self.isDiscovering {
                 BleLogger.info("⚠️ DIAGNOSTICO después de 3 segundos: \(self.bleDevicesFound) dispositivos encontrados")
-                
+
                 if self.bleDevicesFound == 0 {
                     BleLogger.error("❌ No se ha detectado ningún dispositivo BLE después de 3 segundos")
                     BleLogger.info("🔄 Reiniciando escaneo con diferentes parámetros...")
-                    
+
                     // Reintentar con diferentes opciones de escaneo
                     self.centralManager?.stopScan()
                     self.centralManager?.scanForPeripherals(
@@ -264,13 +264,13 @@ import CoreBluetooth
                 }
             }
         }
-        
+
         // Programar un segundo escaneo específico para el UUID después de 6 segundos
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
             if self.isDiscovering {
                 BleLogger.info("🔎 Cambiando a modo de escaneo específico por UUID después de 6 segundos")
                 BleLogger.info("⚠️ DIAGNOSTICO: \(self.bleDevicesFound) dispositivos encontrados hasta ahora")
-                
+
                 self.centralManager?.stopScan()
                 self.centralManager?.scanForPeripherals(
                     withServices: [self.serviceUUID],
@@ -609,7 +609,7 @@ public protocol NearbyMultipeerDelegate: AnyObject {
 // MARK: - MCSessionDelegate
 
 extension NearbyMultipeer: MCSessionDelegate {
-    public func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+    /* public */ func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
         // Notificar el cambio de estado de conexión
         let endpointId = peerID.displayName
 
@@ -632,7 +632,7 @@ extension NearbyMultipeer: MCSessionDelegate {
         }
     }
 
-    public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+    /* public */ func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         // Convertir los datos recibidos a string
         if let message = String(data: data, encoding: .utf8) {
             print("Mensaje recibido de \(peerID.displayName): \(message)")
@@ -650,11 +650,11 @@ extension NearbyMultipeer: MCSessionDelegate {
         }
     }
 
-    public func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {
+    /* public */ func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {
         // No implementado para este plugin
     }
 
-    public func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
+    /* public */ func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
         // Notificar el progreso de la transferencia
         DispatchQueue.main.async {
             self.delegate?.onPayloadTransferUpdate(
@@ -666,7 +666,7 @@ extension NearbyMultipeer: MCSessionDelegate {
         }
     }
 
-    public func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
+    /* public */ func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
         if let error = error {
             print("Error al recibir recurso: \(error.localizedDescription)")
         } else {
@@ -688,7 +688,7 @@ extension NearbyMultipeer: MCSessionDelegate {
 // MARK: - MCNearbyServiceAdvertiserDelegate
 
 extension NearbyMultipeer: MCNearbyServiceAdvertiserDelegate {
-    public func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+    /* public */ func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
         print("Invitación recibida de: \(peerID.displayName)")
 
         // Almacenar el handler para usarlo después de que el usuario acepte o rechace
@@ -704,7 +704,7 @@ extension NearbyMultipeer: MCNearbyServiceAdvertiserDelegate {
         }
     }
 
-    public func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
+    /* public */ func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
         print("Error al iniciar advertising: \(error.localizedDescription)")
         delegate?.onError(error: "Error al iniciar advertising: \(error.localizedDescription)")
     }
@@ -713,7 +713,7 @@ extension NearbyMultipeer: MCNearbyServiceAdvertiserDelegate {
 // MARK: - MCNearbyServiceBrowserDelegate
 
 extension NearbyMultipeer: MCNearbyServiceBrowserDelegate {
-    public func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
+    /* public */ func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
         print("Peer encontrado: \(peerID.displayName)")
 
         // Añadir a la lista de peers encontrados
@@ -734,7 +734,7 @@ extension NearbyMultipeer: MCNearbyServiceBrowserDelegate {
         }
     }
 
-    public func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
+    /* public */ func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         print("Peer perdido: \(peerID.displayName)")
 
         // Eliminar de la lista de peers encontrados
@@ -746,16 +746,16 @@ extension NearbyMultipeer: MCNearbyServiceBrowserDelegate {
         }
     }
 
-    public func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
+    /* public */ func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
         print("Error al iniciar discovery: \(error.localizedDescription)")
         delegate?.onError(error: "Error al iniciar discovery: \(error.localizedDescription)")
     }
 }
 
 // MARK: - CBCentralManagerDelegate
-
-extension NearbyMultipeer: CBCentralManagerDelegate {
-    public func centralManagerDidUpdateState(_ central: CBCentralManager) {
+// Conformance added to class declaration
+extension NearbyMultipeer /* : CBCentralManagerDelegate */ { // Delegate conformance moved to class declaration
+    /* public */ func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             print("Bluetooth central está encendido")
@@ -778,28 +778,36 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
         }
     }
 
-    public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+    /* public */ func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        // Define endpointName, shouldNotifyDevice, and detectionReason locally
+        let endpointName = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "UnknownDevice"
+        var shouldNotifyDevice = true // Default behavior for now, make it mutable if logic requires
+        var detectionReason = "Default discovery" // Default reason for now, make it mutable
+
         // Incrementar contador de dispositivos encontrados (antes de cualquier filtrado)
         bleDevicesFound += 1
-        
+
         // Loguear todos los dispositivos encontrados
-        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-        
+        // The 'name' variable is used later in the 'if shouldNotifyDevice || name.contains("_")'
+        // This 'name' should be the same as 'endpointName' or derived similarly.
+        // Using 'endpointName' directly for clarity and consistency.
+        let name = endpointName
+
         // Log detallado del advertisementData para depuración
-        BleLogger.info("🔍 Dispositivo BLE #\(bleDevicesFound) encontrado: \(name)")
+        BleLogger.info("🔍 Dispositivo BLE #\(bleDevicesFound) encontrado: \(name)") // Use the local 'name'
         BleLogger.info("📱 UUID: \(peripheral.identifier.uuidString)")
         BleLogger.info("📶 RSSI: \(RSSI.intValue) dBm")
-        
+
         // Log detallado de cada campo del advertisementData
         for (key, value) in advertisementData {
             let valueStr = String(describing: value)
             BleLogger.debug("📦 [\(key)]: \(valueStr)")
-            
+
             // Si hay datos del fabricante, mostrarlos en hexadecimal
             if key == CBAdvertisementDataManufacturerDataKey, let data = value as? Data {
                 let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
                 BleLogger.debug("🧩 Manufacturer Data (HEX): \(hexString)")
-                
+
                 // Comprobar si contiene "NMP" (0x4E 0x4D 0x50) en cualquier posición
                 var foundNMP = false
                 for i in 0..<max(0, data.count - 2) {
@@ -809,17 +817,17 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
                         break
                     }
                 }
-                
+
                 if !foundNMP {
                     BleLogger.debug("❌ Secuencia 'NMP' NO encontrada en los datos")
                 }
             }
-            
+
             // Si hay UUIDs de servicio, mostrarlos individualmente
             if key == CBAdvertisementDataServiceUUIDsKey, let uuids = value as? [CBUUID] {
                 for (index, uuid) in uuids.enumerated() {
                     BleLogger.debug("🔌 Service UUID \(index+1): \(uuid.uuidString)")
-                    
+
                     // Comprobar si coincide con nuestro UUID de servicio
                     if uuid == serviceUUID {
                         BleLogger.info("✅ UUID coincide con nuestro serviceUUID")
@@ -828,53 +836,89 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
                     }
                 }
             }
-            
+
             // Si hay datos de servicio, mostrarlos en hexadecimal
-            if key == CBAdvertisementDataServiceDataKey, let serviceData = value as? [CBUUID: Data] {
-                for (serviceUUID, data) in serviceData {
-                    let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-                    BleLogger.debug("🔧 Service Data para \(serviceUUID.uuidString): \(hexString)")
-        }
-        
+            if key == CBAdvertisementDataServiceDataKey, let serviceDataDict = value as? [CBUUID: Data] { // Renamed to serviceDataDict
+                for (serviceUUIDKey, dataValue) in serviceDataDict { // Renamed to serviceUUIDKey and dataValue
+                    let hexString = dataValue.map { String(format: "%02X", $0) }.joined(separator: " ")
+                    BleLogger.debug("🔧 Service Data para \(serviceUUIDKey.uuidString): \(hexString)")
+                } // Closing brace for inner for-loop
+            } // Closing brace for if key == CBAdvertisementDataServiceDataKey
+        } // Closing brace for for (key, value) in advertisementData
+
         // Verificar datos del fabricante para identificar dispositivos Android
         var isAndroidDevice = false
-        var deviceType: UInt8 = 0
-        var deviceName: String?
-        
+        // var deviceType: UInt8 = 0 // Not needed here
+        // var deviceName: String? // 'endpointName' is used
+
+        var isAndroidDevice = false // Reset for each discovered peripheral
+
         if let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data {
-            // Verificar si los primeros 3 bytes son "NMP"
-            if manufacturerData.count >= 3 &&
-               manufacturerData[0] == 0x4E &&
-               manufacturerData[1] == 0x4D &&
-               manufacturerData[2] == 0x50 {
+            BleLogger.logHexData("Discovered Manufacturer Data for \(endpointName)", data: manufacturerData)
+            // Check for NMP magic bytes, protocol version, and Android device type
+            if manufacturerData.count >= 5 &&
+               manufacturerData[0] == 0x4E && manufacturerData[1] == 0x4D && manufacturerData[2] == 0x50 && // "NMP"
+               manufacturerData[3] == 0x01 && // Protocol version 1
+               manufacturerData[4] == 0x01 {  // Device type Android (0x01)
+
+                isAndroidDevice = true
+                detectionReason = "Android device identified via Manufacturer Data (NMP, v1, Type 0x01)."
+
+                // Optionally extract device name if Android appends it after the first 5 bytes
+                if manufacturerData.count > 5 {
+                    let nameData = manufacturerData.subdata(in: 5..<manufacturerData.count)
+                    if let advertisedName = String(data: nameData, encoding: .utf8), !advertisedName.isEmpty {
+                        // Potentially use this name if it's more reliable or specific than peripheral.name
+                        // For now, just log it. 'endpointName' is already derived from peripheral.name or CBAdvertisementDataLocalNameKey.
+                        BleLogger.info("Extracted name from Android manufacturer data: \(advertisedName) for \(endpointName)")
+                    }
+                }
+                BleLogger.info("✅ \(detectionReason)")
+            } else {
+                detectionReason = "Manufacturer data present but not NMP/Android v1/Type 0x01. Data: \(manufacturerData.map { String(format: "%02X", $0) }.joined())"
+                BleLogger.debug(detectionReason)
             }
+        } else {
+            detectionReason = "No Manufacturer Data key found in advertisement."
+            BleLogger.debug(detectionReason)
         }
-        
-        // IMPORTANTE: En modo diagnóstico, notificamos TODOS los dispositivos BLE
-        // aunque no sean detectados como Android, para determinar si hay problemas de detección
-        if shouldNotifyDevice || name.contains("_") {
+
+        // Fallback or additional check: if device name contains "android" (case-insensitive)
+        // This can be less reliable than manufacturer data.
+        if !isAndroidDevice && endpointName.lowercased().contains("android_") {
+             // isAndroidDevice = true // Uncomment if this heuristic is desired
+             detectionReason += " Name '\(endpointName)' contains 'android_'."
+             BleLogger.info("Device name '\(endpointName)' suggests Android. Current detection reason: \(detectionReason)")
+             // shouldNotifyDevice = true // Ensure notification if name matches and this heuristic is used
+        }
+
+        // Notify if identified as an Android device based on the specific criteria
+        if isAndroidDevice {
             let endpointId = peripheral.identifier.uuidString
-            BleLogger.info("🔔 Notificando dispositivo: \(endpointName) (\(isAndroidDevice ? "Android" : "Tipo desconocido"))")
-            BleLogger.info("🧩 Razón: \(detectionReason)")
-            
-            // Si ya habíamos descubierto este dispositivo, no notificar de nuevo
+            BleLogger.info("🔔 Android device confirmed: \(endpointName) (\(endpointId)). Reason: \(detectionReason)")
+
             if discoveredPeripherals[endpointId] == nil {
                 discoveredPeripherals[endpointId] = peripheral
-                
-                // Notificar al delegate
                 DispatchQueue.main.async {
                     self.delegate?.onEndpointFound(
-                        endpointId: endpointId, 
-                        endpointName: endpointName, 
-                        serviceId: "BLE_Device"
+                        endpointId: endpointId,
+                        endpointName: endpointName,
+                        serviceId: self.serviceUUID.uuidString // Indicate it's our specific BLE service
                     )
                 }
-                BleLogger.info("✅ Nuevo dispositivo notificado: \(endpointId) (\(endpointName))")
+                BleLogger.info("✅ Successfully notified delegate for discovered Android device: \(endpointName)")
+            } else {
+                BleLogger.info("ℹ️ Android device \(endpointName) already discovered.")
             }
+        } else if shouldNotifyDevice { // This 'shouldNotifyDevice' is from the top of the function, usually true.
+                                     // This block is for general device logging if not specifically Android.
+            BleLogger.debug("Non-Android device detected: \(endpointName). Reason: \(detectionReason). Generic notification based on shouldNotifyDevice=true.")
+            // Optionally, handle general BLE devices differently or not at all if only specific Android devices are targets.
+            // For now, this will log but not call onEndpointFound unless isAndroidDevice is true.
         }
     }
 
-    public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+    /* public */ func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) { // Removed public
         let endpointId = peripheral.identifier.uuidString
         print("Conectado a dispositivo Bluetooth: \(peripheral.name ?? endpointId)")
 
@@ -893,7 +937,7 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
         }
     }
 
-    public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+    /* public */ func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) { // Removed public
         let endpointId = peripheral.identifier.uuidString
         print("Error al conectar con dispositivo Bluetooth: \(peripheral.name ?? endpointId), error: \(error?.localizedDescription ?? "unknown")")
 
@@ -903,7 +947,7 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
         }
     }
 
-    public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+    /* public */ func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) { // Removed public
         let endpointId = peripheral.identifier.uuidString
         print("Desconectado de dispositivo Bluetooth: \(peripheral.name ?? endpointId)")
 
@@ -929,9 +973,9 @@ extension NearbyMultipeer: CBCentralManagerDelegate {
 }
 
 // MARK: - CBPeripheralDelegate
-
-extension NearbyMultipeer: CBPeripheralDelegate {
-    public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+// Conformance added to class declaration
+extension NearbyMultipeer /* : CBPeripheralDelegate */ { // Delegate conformance moved to class declaration
+    /* public */ func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
             print("Error al descubrir servicios: \(error.localizedDescription)")
             return
@@ -945,7 +989,7 @@ extension NearbyMultipeer: CBPeripheralDelegate {
         }
     }
 
-    public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+    /* public */ func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
             print("Error al descubrir características: \(error.localizedDescription)")
             return
@@ -966,7 +1010,7 @@ extension NearbyMultipeer: CBPeripheralDelegate {
         }
     }
 
-    public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+    /* public */ func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
             print("Error al recibir datos: \(error.localizedDescription)")
             return
@@ -986,7 +1030,7 @@ extension NearbyMultipeer: CBPeripheralDelegate {
         }
     }
 
-    public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+    /* public */ func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
             print("Error al enviar datos: \(error.localizedDescription)")
             return
@@ -997,9 +1041,9 @@ extension NearbyMultipeer: CBPeripheralDelegate {
 }
 
 // MARK: - CBPeripheralManagerDelegate
-
-extension NearbyMultipeer: CBPeripheralManagerDelegate {
-    public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+// Conformance added to class declaration
+extension NearbyMultipeer /* : CBPeripheralManagerDelegate */ { // Delegate conformance moved to class declaration
+    /* public */ func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
         switch peripheral.state {
         case .poweredOn:
             print("Bluetooth peripheral está encendido")
@@ -1022,7 +1066,7 @@ extension NearbyMultipeer: CBPeripheralManagerDelegate {
         }
     }
 
-    public func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+    /* public */ func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         if let error = error {
             print("Error al añadir servicio: \(error.localizedDescription)")
             return
@@ -1031,7 +1075,7 @@ extension NearbyMultipeer: CBPeripheralManagerDelegate {
         print("Servicio añadido correctamente")
     }
 
-    public func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+    /* public */ func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
         // Respond with the device name
         if request.characteristic.uuid == NearbyMultipeer.CHARACTERISTIC_UUID {
             if let data = deviceName.data(using: .utf8) {
@@ -1045,7 +1089,7 @@ extension NearbyMultipeer: CBPeripheralManagerDelegate {
         }
     }
 
-    public func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+    /* public */ func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         for request in requests {
             if request.characteristic.uuid == NearbyMultipeer.CHARACTERISTIC_UUID,
                let data = request.value,
@@ -1065,7 +1109,7 @@ extension NearbyMultipeer: CBPeripheralManagerDelegate {
             }
         }
     }
-}
+} // This closes the CBPeripheralManagerDelegate extension
 
 // Extensión para padding de strings
 extension String {
